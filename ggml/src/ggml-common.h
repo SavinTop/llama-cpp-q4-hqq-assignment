@@ -248,6 +248,16 @@ typedef struct {
 } block_q5_1;
 static_assert(sizeof(block_q5_1) == 2 * sizeof(ggml_half) + sizeof(uint32_t) + QK5_1 / 2, "wrong q5_1 block size/padding");
 
+#define QK4_HQQ 32
+static_assert(QK4_HQQ == 32, "QK4_HQQ must be 32");
+typedef struct {
+    ggml_half scale;
+    ggml_half zero;
+    uint8_t qs[QK4_HQQ / 2];
+} block_q4_hqq;
+static_assert(sizeof(block_q4_hqq) == 20, "block_q4_hqq must be 20 bytes");
+static_assert(sizeof(block_q4_hqq) * 8 == QK4_HQQ * 5, "block_q4_hqq must be exactly 5.0 bpw");
+
 #define QK8_0 32
 typedef struct {
     ggml_half d;       // delta
