@@ -8819,6 +8819,16 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
 
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, 16, 1, 256, {1, 1}, {1, 1}));
 
+    // Targeted CPU Q4_HQQ cache-write (F32 -> Q4_HQQ) and read-back (Q4_HQQ -> F32)
+    test_cases.emplace_back(new test_cpy(GGML_TYPE_F32,  GGML_TYPE_Q4_HQQ, {256, 4, 4, 4}));
+    test_cases.emplace_back(new test_cpy(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, {256, 4, 4, 4}));
+    test_cases.emplace_back(new test_cpy(GGML_TYPE_F32,  GGML_TYPE_Q4_HQQ, {8192, 512, 2, 1}));
+    test_cases.emplace_back(new test_cpy(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, {8192, 512, 2, 1}));
+
+    // Narrow CPU FLASH_ATTN_EXT with Q4_HQQ cache
+    test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_Q4_HQQ));
+    test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_F16));
+
 
 #if 0
     {

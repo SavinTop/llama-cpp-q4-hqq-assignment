@@ -1301,6 +1301,20 @@ void ggml_vec_dot_q4_hqq_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,
     float sumf = 0;
 
     for (int i = 0; i < nb; ++i) {
+        // Zero-buffer sentinel: backend KV buffers are initialized by
+        // byte-wise zeroing, producing an all-zero 20-byte block.
+        // Detect by raw FP16 bit pattern: scale==0, zero==0, all qs==0.
+        // This block contributes nothing to the dot product.
+        if (x[i].scale == 0 && x[i].zero == 0) {
+            bool all_zero = true;
+            for (int j = 0; j < QK4_HQQ/2; ++j) {
+                if (x[i].qs[j] != 0) { all_zero = false; break; }
+            }
+            if (all_zero) {
+                continue;
+            }
+        }
+
         const float d8      = GGML_CPU_FP16_TO_FP32(y[i].d);
         const float scale4  = GGML_CPU_FP16_TO_FP32(x[i].scale);
         const float zero4   = GGML_CPU_FP16_TO_FP32(x[i].zero);

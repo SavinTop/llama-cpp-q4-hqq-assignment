@@ -1,4 +1,4 @@
-#include "ggml.h"
+﻿#include "ggml.h"
 #include "ggml-cpu.h"
 
 #undef NDEBUG
@@ -769,6 +769,150 @@ int main(void) {
             }
         }
 
+        // 6. All-zero block sentinel: zero scale+zero+codes must still be rejected
+        //    (sentinel is only for runtime, not for persisted GGUF)
+        {
+            memset(&buf[0], 0, nbytes);
+            if (ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+                printf("validate: all-zero block ACCEPTED (should reject): FAILED\n");
+                bad++;
+            } else {
+                printf("%-40s: ok\n", "validate all-zero block rejected (sentinel not persisted)");
+            }
+        }
+
+        num_failed += (bad > 0);
+    }
+
+    //
+    // Zero-buffer sentinel regression tests
+    //
+    // KV cache buffers are initialized by byte-wise zeroing, producing
+    // scale=0, zero=0, all qs=0 blocks.  The sentinel treats this pattern
+    // as all-zero output without the 0/0 NaN problem.
+
+    // 1. All-zero block dequantization  ->  every output finite and exactly zero
+    {
+        const int qk = 32;
+        int bad = 0;
+        size_t nbytes = ggml_row_size(GGML_TYPE_Q4_HQQ, qk);
+        std::vector<uint8_t> zero_buf(nbytes, 0);
+        std::vector<float> dequant(qk);
+
+        const auto * qfns = ggml_get_type_traits(GGML_TYPE_Q4_HQQ);
+        qfns->to_float(zero_buf.data(), dequant.data(), qk);
+
+        for (int i = 0; i < qk; i++) {
+            if (!isfinite(dequant[i])) {
+                printf("zero-block dequant: element %d is not finite (%f): FAILED\n", i, dequant[i]);
+                bad++;
+            }
+            if (dequant[i] != 0.0f) {
+                printf("zero-block dequant: element %d is %f, expected 0: FAILED\n", i, dequant[i]);
+                bad++;
+            }
+        }
+        printf("%-40s: %s\n", "zero-block dequant all finite zero", RESULT_STR[bad > 0]);
+        num_failed += (bad > 0);
+    }
+
+    // 2. All-zero block dot product with non-zero Q8_0  ->  result finite and exactly zero
+    {
+        const int qk = 32;
+        int bad = 0;
+
+        // All-zero Q4_HQQ block
+        size_t row_size_q4 = ggml_row_size(GGML_TYPE_Q4_HQQ, qk);
+        std::vector<uint8_t> zero_q4(row_size_q4, 0);
+
+        // Non-zero Q8_0 block: scale=1.0, all codes=1
+        size_t row_size_q8 = ggml_row_size(GGML_TYPE_Q8_0, qk);
+        std::vector<uint8_t> q8_buf(row_size_q8);
+        ggml_fp16_t d8 = ggml_fp32_to_fp16(1.0f);
+        memcpy(q8_buf.data(), &d8, 2);
+        memset(q8_buf.data() + 2, 1, qk);
+
+        float dot_result = 1234.0f; // sentinel
+        const auto * cpu_traits = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        cpu_traits->vec_dot(qk, &dot_result, 0, zero_q4.data(), 0, q8_buf.data(), 0, 1);
+
+        if (!isfinite(dot_result)) {
+            printf("zero-block vec_dot: result not finite (%f): FAILED\n", dot_result);
+            bad++;
+        }
+        if (dot_result != 0.0f) {
+            printf("zero-block vec_dot: result is %f, expected 0: FAILED\n", dot_result);
+            bad++;
+        }
+        printf("%-40s: %s\n", "zero-block vec_dot finite zero", RESULT_STR[bad > 0]);
+        num_failed += (bad > 0);
+    }
+
+    // 3. Normal valid block still uses the required formula
+    {
+        const int qk = 32;
+        int bad = 0;
+        size_t row_size_q4 = ggml_row_size(GGML_TYPE_Q4_HQQ, qk);
+        std::vector<uint8_t> buf(row_size_q4);
+
+        // scale=2.0, zero=1.5, codes=0x44 (all 4)
+        ggml_fp16_t scale = ggml_fp32_to_fp16(2.0f);
+        ggml_fp16_t zero  = ggml_fp32_to_fp16(1.5f);
+        memcpy(&buf[0], &scale, 2);
+        memcpy(&buf[2], &zero,  2);
+        memset(&buf[4], 0x44, 16);
+
+        // Dequantize
+        std::vector<float> dequant(qk);
+        const auto * qfns = ggml_get_type_traits(GGML_TYPE_Q4_HQQ);
+        qfns->to_float(buf.data(), dequant.data(), qk);
+
+        float expected = ((float)4 - 1.5f) / 2.0f; // = 1.25
+        for (int i = 0; i < qk; i++) {
+            if (fabsf(dequant[i] - expected) > 1.0e-4f) {
+                printf("normal-block dequant: element %d is %f, expected %f: FAILED\n", i, dequant[i], expected);
+                bad++;
+                break;
+            }
+        }
+
+        // Dot product with Q8_0 scale=0.25, all codes=1  ->  expected = 10.0
+        size_t row_size_q8 = ggml_row_size(GGML_TYPE_Q8_0, qk);
+        std::vector<uint8_t> q8_buf(row_size_q8);
+        ggml_fp16_t d8 = ggml_fp32_to_fp16(0.25f);
+        memcpy(q8_buf.data(), &d8, 2);
+        memset(q8_buf.data() + 2, 1, qk);
+
+        float dot_result = 0.0f;
+        const auto * cpu_traits = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        cpu_traits->vec_dot(qk, &dot_result, 0, buf.data(), 0, q8_buf.data(), 0, 1);
+
+        float dot_expected = 0.25f / 2.0f * ((float)(32*4) - 1.5f * 32.0f); // = 10.0
+        if (fabsf(dot_result - dot_expected) > 1.0e-4f) {
+            printf("normal-block vec_dot: result %f, expected %f: FAILED\n", dot_result, dot_expected);
+            bad++;
+        }
+
+        printf("%-40s: %s\n", "normal block formula preserved", RESULT_STR[bad > 0]);
+        num_failed += (bad > 0);
+    }
+
+    // 4. Malformed zero-scale block (non-zero codes/metadata) still rejected
+    {
+        size_t nbytes = ggml_row_size(GGML_TYPE_Q4_HQQ, 32);
+        std::vector<uint8_t> buf(nbytes, 0);
+        ggml_fp16_t scale = ggml_fp32_to_fp16(0.0f);
+        ggml_fp16_t zero  = ggml_fp32_to_fp16(1.5f);
+        memcpy(&buf[0], &scale, 2);
+        memcpy(&buf[2], &zero,  2);
+        memset(&buf[4], 0x44, 16);
+        int bad = 0;
+        if (ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+            printf("validate: zero-scale with non-zero codes ACCEPTED: FAILED\n");
+            bad++;
+        } else {
+            printf("%-40s: ok\n", "validate zero-scale non-zero codes rejected");
+        }
         num_failed += (bad > 0);
     }
 

@@ -608,6 +608,26 @@ void dequantize_row_q4_hqq(const block_q4_hqq * GGML_RESTRICT x, float * GGML_RE
     const int nb = k / qk;
 
     for (int i = 0; i < nb; i++) {
+        // Zero-buffer sentinel: backend KV buffers are initialized by
+        // byte-wise zeroing, producing an all-zero 20-byte block.
+        // Detect by raw FP16 bit pattern: scale==0, zero==0, all qs==0.
+        // This block represents all-zero output without 0/0.
+        // The sentinel is only for runtime KV-cache buffers, not for
+        // persisted GGUF data -- ggml_validate_row_data continues to
+        // reject scale==0 for persisted blocks.
+        if (x[i].scale == 0 && x[i].zero == 0) {
+            bool all_zero = true;
+            for (int j = 0; j < QK4_HQQ/2; ++j) {
+                if (x[i].qs[j] != 0) { all_zero = false; break; }
+            }
+            if (all_zero) {
+                for (int j = 0; j < QK4_HQQ; ++j) {
+                    y[i*QK4_HQQ + j] = 0.0f;
+                }
+                continue;
+            }
+        }
+
         const float scale = GGML_FP16_TO_FP32(x[i].scale);
         const float zero  = GGML_FP16_TO_FP32(x[i].zero);
 
