@@ -405,6 +405,288 @@ int main(void) {
         num_failed += (bad > 0);
     }
 
+    // CPU trait assertions for Q4_HQQ
+    {
+        const auto * cpu_traits = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        bool ok = true;
+        if (cpu_traits->from_float == nullptr) {
+            printf("CPU trait from_float is null: FAILED\n");
+            ok = false;
+        }
+        if (cpu_traits->vec_dot == nullptr) {
+            printf("CPU trait vec_dot is null: FAILED\n");
+            ok = false;
+        }
+        if (cpu_traits->vec_dot_type != GGML_TYPE_Q8_0) {
+            printf("CPU trait vec_dot_type != Q8_0: FAILED\n");
+            ok = false;
+        }
+        if (cpu_traits->nrows != 1) {
+            printf("CPU trait nrows != 1: FAILED\n");
+            ok = false;
+        }
+        printf("%-40s: %s\n", "CPU traits (from_float, vec_dot, vec_dot_type, nrows)", RESULT_STR[!ok]);
+        num_failed += !ok;
+    }
+
+    //
+    // Dot product tests
+    //
+
+    // Quantize to Q4_HQQ and Q8_0 then compute dot product via vec_dot
+    // Reference: dequantize both sides and compute F32 dot product
+    auto dot_q4_hqq_vs_f32 = [&](const float * data_q4, const float * data_q8, int n, const char * label) -> int {
+        const auto * qfns    = ggml_get_type_traits(GGML_TYPE_Q4_HQQ);
+        const auto * qfns_cpu = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        assert(n % qfns->blck_size == 0);
+
+        size_t row_size_q4 = ggml_row_size(GGML_TYPE_Q4_HQQ, n);
+        std::vector<uint8_t> buf_q4(row_size_q4);
+        qfns_cpu->from_float(data_q4, buf_q4.data(), n);
+
+        size_t row_size_q8 = ggml_row_size(GGML_TYPE_Q8_0, n);
+        std::vector<uint8_t> buf_q8(row_size_q8);
+        const auto * q8_traits = ggml_get_type_traits(GGML_TYPE_Q8_0);
+        q8_traits->from_float_ref(data_q8, buf_q8.data(), n);
+
+        // Dequantize both sides for the reference dot product
+        std::vector<float> deq_q4(n), deq_q8(n);
+        qfns->to_float(buf_q4.data(), deq_q4.data(), n);
+        q8_traits->to_float(buf_q8.data(), deq_q8.data(), n);
+
+        float ref = 0.0f;
+        for (int i = 0; i < n; i++) ref += deq_q4[i] * deq_q8[i];
+
+        float dot_via_vec = 0.0f;
+        const auto * cpu_traits = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        if (cpu_traits->vec_dot) {
+            cpu_traits->vec_dot(n, &dot_via_vec, 0, buf_q4.data(), 0, buf_q8.data(), 0, 1);
+        } else {
+            printf("vec_dot not registered for Q4_HQQ\n");
+            return 1;
+        }
+
+        float err = fabsf(dot_via_vec - ref);
+        float tol = fmaxf(1.0e-4f, fabsf(ref) * 1.0e-4f);
+        bool ok = (err <= tol);
+        if (!ok) {
+            printf("%-40s vec_dot=%f ref=%f err=%f tol=%f: FAILED\n", label, dot_via_vec, ref, err, tol);
+        } else {
+            printf("%-40s vec_dot=%f ref=%f err=%f tol=%f: ok\n", label, dot_via_vec, ref, err, tol);
+        }
+        return ok ? 0 : 1;
+    };
+
+    // Random vectors
+    {
+        const int n = 32;
+        srand(42);
+        std::vector<float> a(n), b(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+            b[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+        }
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot random vectors");
+    }
+
+    // Positive-only values
+    {
+        const int n = 32;
+        srand(42);
+        std::vector<float> a(n), b(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = (float)(rand() % 1000) / 100.0f + 0.01f;
+            b[i] = (float)(rand() % 1000) / 100.0f + 0.01f;
+        }
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot positive-only");
+    }
+
+    // Negative-only values
+    {
+        const int n = 32;
+        srand(42);
+        std::vector<float> a(n), b(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = -((float)(rand() % 1000) / 100.0f + 0.01f);
+            b[i] = -((float)(rand() % 1000) / 100.0f + 0.01f);
+        }
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot negative-only");
+    }
+
+    // Mixed-sign values
+    {
+        const int n = 32;
+        srand(42);
+        std::vector<float> a(n), b(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+            b[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+        }
+        // Ensure mix of signs
+        a[0] = -50.0f; b[0] = 30.0f;
+        a[1] = 60.0f;  b[1] = -40.0f;
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot mixed-sign");
+    }
+
+    // Constant Q4_HQQ blocks (all same value)
+    {
+        const int n = 32;
+        std::vector<float> a(n, 1.5f);
+        std::vector<float> b(n);
+        srand(42);
+        for (int i = 0; i < n; i++) {
+            b[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+        }
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot constant Q4 block");
+    }
+
+    // Q8 vectors with non-zero sum (tests zero-point correction)
+    {
+        const int n = 32;
+        std::vector<float> a(n);
+        srand(42);
+        for (int i = 0; i < n; i++) {
+            a[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+        }
+        std::vector<float> b(n, 100.0f); // large positive constant -> non-zero sum
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot Q8 non-zero sum");
+    }
+
+    // Multiple blocks (64 elements = 2 blocks)
+    {
+        const int n = 64;
+        srand(42);
+        std::vector<float> a(n), b(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+            b[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+        }
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot 2 blocks (64 elts)");
+    }
+
+    // Fractional-zero regression test: guarantees fractional FP16 zero point
+    // Values span min=-0.1, max=0.9 so zero = -min * scale = 0.1*15/1.0 = 1.5 exactly
+    {
+        const int n = 32;
+        std::vector<float> a(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = -0.1f + (float)i / 31.0f;
+        }
+        std::vector<float> b(n, 1.0f); // definitely non-zero sum (sum = 32)
+
+        const auto * qfns    = ggml_get_type_traits(GGML_TYPE_Q4_HQQ);
+        const auto * qfns_cpu = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        size_t row_size_q4 = ggml_row_size(GGML_TYPE_Q4_HQQ, n);
+        std::vector<uint8_t> buf_q4(row_size_q4);
+        qfns_cpu->from_float(a.data(), buf_q4.data(), n);
+
+        // Read stored FP16 zero and assert it has a meaningful fractional part
+        ggml_fp16_t hzero;
+        memcpy(&hzero, buf_q4.data() + 2, sizeof(hzero));
+        float zero_stored = ggml_fp16_to_fp32(hzero);
+        float zero_frac = zero_stored - floorf(zero_stored);
+        bool has_frac = (zero_frac > 0.001f) && (zero_frac < 0.999f);
+        if (!has_frac) {
+            printf("fractional-zero: stored zero %f has no meaningful fractional part (frac=%f)\n", zero_stored, zero_frac);
+            num_failed++;
+        }
+
+        // Q8_0 quantize b
+        size_t row_size_q8 = ggml_row_size(GGML_TYPE_Q8_0, n);
+        std::vector<uint8_t> buf_q8(row_size_q8);
+        const auto * q8_traits = ggml_get_type_traits(GGML_TYPE_Q8_0);
+        q8_traits->from_float_ref(b.data(), buf_q8.data(), n);
+
+        // Dequantized reference (correct, float zero)
+        std::vector<float> deq_q4(n), deq_q8(n);
+        qfns->to_float(buf_q4.data(), deq_q4.data(), n);
+        q8_traits->to_float(buf_q8.data(), deq_q8.data(), n);
+        float ref_correct = 0.0f;
+        for (int i = 0; i < n; i++) ref_correct += deq_q4[i] * deq_q8[i];
+
+        // Intentionally broken reference using (int)zero
+        float ref_broken = 0.0f;
+        {
+            // Reconstruct using integer-zero dequant
+            ggml_fp16_t hscale;
+            memcpy(&hscale, buf_q4.data(), sizeof(hscale));
+            float scale_stored = ggml_fp16_to_fp32(hscale);
+            int zero_int = (int)zero_stored;
+            for (int i = 0; i < n; i++) {
+                float w = 0.0f;
+                int block_idx = i / 32;
+                int elem = i % 32;
+                int byte_idx = elem % (int)(qfns->blck_size / 2);
+                int nibble = (elem < (int)(qfns->blck_size / 2)) ? (buf_q4[block_idx * 20 + 4 + byte_idx] & 0x0F)
+                                                   : (buf_q4[block_idx * 20 + 4 + byte_idx] >> 4);
+                w = ((float)nibble - (float)zero_int) / scale_stored;
+                ref_broken += w * deq_q8[i];
+            }
+        }
+
+        float dot_via_vec = 0.0f;
+        qfns_cpu->vec_dot(n, &dot_via_vec, 0, buf_q4.data(), 0, buf_q8.data(), 0, 1);
+
+        float err_correct = fabsf(dot_via_vec - ref_correct);
+        float err_broken   = fabsf(dot_via_vec - ref_broken);
+        float tol = fmaxf(1.0e-4f, fabsf(ref_correct) * 1.0e-4f);
+
+        bool match_correct = (err_correct <= tol);
+        bool differs_from_broken = (err_broken > tol * 10.0f);
+
+        if (!match_correct) {
+            printf("fractional-zero: vec_dot=%f ref=%f err=%f tol=%f: FAILED (does not match correct ref)\n",
+                   dot_via_vec, ref_correct, err_correct, tol);
+            num_failed++;
+        }
+        if (!differs_from_broken) {
+            printf("fractional-zero: vec_dot=%f broken_ref=%f err=%f: FAILED (does not differ from int-zero ref)\n",
+                   dot_via_vec, ref_broken, err_broken);
+            num_failed++;
+        }
+        if (match_correct && differs_from_broken) {
+            printf("%-40s vec_dot=%f correct=%f broken=%f: ok\n", "dot fractional-zero regression",
+                   dot_via_vec, ref_correct, ref_broken);
+        }
+    }
+
+    // Manually constructed block: scale=2, zero=1.5, all codes=4, q8 scale=0.25, all q8 codes=1
+    // Correct: d8/scale * 32 * (4*1 - 1.5*1) = 0.25/2 * 32 * 2.5 = 10.0
+    // Int-zero: 0.25/2 * 32 * (4 - 1*1) = 0.125 * 32 * 3 = 12.0
+    {
+        const int n = 32;
+        // Q4_HQQ block as raw bytes: 20 bytes
+        std::vector<uint8_t> manual_q4(20);
+        ggml_fp16_t scale_h = ggml_fp32_to_fp16(2.0f);
+        ggml_fp16_t zero_h  = ggml_fp32_to_fp16(1.5f);
+        memcpy(&manual_q4[0], &scale_h, 2);
+        memcpy(&manual_q4[2], &zero_h,  2);
+        memset(&manual_q4[4], 0x44, 16); // low and high nibble both 4
+
+        // Q8_0 block as raw bytes: 34 bytes
+        std::vector<uint8_t> manual_q8(34);
+        ggml_fp16_t d_h = ggml_fp32_to_fp16(0.25f);
+        memcpy(&manual_q8[0], &d_h, 2);
+        memset(&manual_q8[2], 1, 32);
+
+        float dot_via_vec = 0.0f;
+        const auto * qfns_cpu = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        qfns_cpu->vec_dot(n, &dot_via_vec, 0, manual_q4.data(), 0, manual_q8.data(), 0, 1);
+
+        float expected = 10.0f;
+        float broken   = 12.0f;
+        float err = fabsf(dot_via_vec - expected);
+        float err_broken = fabsf(dot_via_vec - broken);
+        bool ok = (err < 1.0e-4f) && (err_broken > 1.0f);
+        if (!ok) {
+            printf("manual-block: vec_dot=%f expected=%f broken=%f: FAILED\n", dot_via_vec, expected, broken);
+            num_failed++;
+        } else {
+            printf("%-40s vec_dot=%f expected=%f broken=%f: ok\n", "dot manual constant block (int-zero fail)",
+                   dot_via_vec, expected, broken);
+        }
+    }
+
     if (num_failed) {
         printf("\n%d test(s) FAILED\n", num_failed);
     } else {
