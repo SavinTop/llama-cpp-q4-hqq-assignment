@@ -687,6 +687,91 @@ int main(void) {
         }
     }
 
+    // ggml_validate_row_data tests
+    {
+        int bad = 0;
+        const int block_size = 32;
+        size_t nbytes = ggml_row_size(GGML_TYPE_Q4_HQQ, block_size);
+        std::vector<uint8_t> buf(nbytes, 0);
+
+        // 1. normal block: scale=2.0, zero=1.5, codes=0x44 (all 4)
+        {
+            ggml_fp16_t scale = ggml_fp32_to_fp16(2.0f);
+            ggml_fp16_t zero  = ggml_fp32_to_fp16(1.5f);
+            memcpy(&buf[0], &scale, 2);
+            memcpy(&buf[2], &zero,  2);
+            memset(&buf[4], 0x44, 16);
+            if (!ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+                printf("validate: normal block REJECTED: FAILED\n");
+                bad++;
+            } else {
+                printf("%-40s: ok\n", "validate normal block");
+            }
+        }
+
+        // 2. zero scale: must be rejected
+        {
+            ggml_fp16_t scale = ggml_fp32_to_fp16(0.0f);
+            ggml_fp16_t zero  = ggml_fp32_to_fp16(1.5f);
+            memcpy(&buf[0], &scale, 2);
+            memcpy(&buf[2], &zero,  2);
+            memset(&buf[4], 0x44, 16);
+            if (ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+                printf("validate: zero scale ACCEPTED: FAILED\n");
+                bad++;
+            } else {
+                printf("%-40s: ok\n", "validate zero scale rejected");
+            }
+        }
+
+        // 3. Inf scale: must be rejected
+        {
+            uint16_t inf_bits = 0x7C00; // +Inf in FP16
+            memcpy(&buf[0], &inf_bits, 2);
+            ggml_fp16_t zero  = ggml_fp32_to_fp16(1.5f);
+            memcpy(&buf[2], &zero,  2);
+            memset(&buf[4], 0x44, 16);
+            if (ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+                printf("validate: Inf scale ACCEPTED: FAILED\n");
+                bad++;
+            } else {
+                printf("%-40s: ok\n", "validate Inf scale rejected");
+            }
+        }
+
+        // 4. Inf zero: must be rejected
+        {
+            ggml_fp16_t scale = ggml_fp32_to_fp16(2.0f);
+            uint16_t inf_bits = 0x7C00; // +Inf in FP16
+            memcpy(&buf[0], &scale, 2);
+            memcpy(&buf[2], &inf_bits, 2);
+            memset(&buf[4], 0x44, 16);
+            if (ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+                printf("validate: Inf zero ACCEPTED: FAILED\n");
+                bad++;
+            } else {
+                printf("%-40s: ok\n", "validate Inf zero rejected");
+            }
+        }
+
+        // 5. NaN zero: must be rejected
+        {
+            ggml_fp16_t scale = ggml_fp32_to_fp16(2.0f);
+            uint16_t nan_bits = 0x7E00; // quiet NaN in FP16
+            memcpy(&buf[0], &scale, 2);
+            memcpy(&buf[2], &nan_bits, 2);
+            memset(&buf[4], 0x44, 16);
+            if (ggml_validate_row_data(GGML_TYPE_Q4_HQQ, buf.data(), nbytes)) {
+                printf("validate: NaN zero ACCEPTED: FAILED\n");
+                bad++;
+            } else {
+                printf("%-40s: ok\n", "validate NaN zero rejected");
+            }
+        }
+
+        num_failed += (bad > 0);
+    }
+
     if (num_failed) {
         printf("\n%d test(s) FAILED\n", num_failed);
     } else {

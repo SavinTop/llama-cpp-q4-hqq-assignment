@@ -5781,6 +5781,24 @@ bool ggml_validate_row_data(enum ggml_type type, const void * data, size_t nbyte
                 VALIDATE_ROW_DATA_D_F16_IMPL(block_iq4_nl, data, nb);
             } break;
 
+        case GGML_TYPE_Q4_HQQ:
+            {
+                const block_q4_hqq * q = (const block_q4_hqq *) data;
+                for (size_t i = 0; i < nb; ++i) {
+                    if (!validate_fp16(q[i].scale, i)) {
+                        return false;
+                    }
+                    const float scale_val = ggml_fp16_to_fp32(q[i].scale);
+                    if (!(scale_val > 0.0f)) {
+                        fprintf(stderr, "ggml_validate_row_data: found non-positive scale %f at block %zu\n", scale_val, i);
+                        return false;
+                    }
+                    if (!validate_fp16(q[i].zero, i)) {
+                        return false;
+                    }
+                }
+            } break;
+
         case GGML_TYPE_I8:
         case GGML_TYPE_I16:
         case GGML_TYPE_I32:
