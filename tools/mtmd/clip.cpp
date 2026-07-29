@@ -176,11 +176,24 @@ struct clip_ctx {
     clip_ctx(clip_context_params & ctx_params) {
         flash_attn_type = ctx_params.flash_attn_type;
         no_alloc = ctx_params.no_alloc;
-        backend_cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+        const bool use_selected_cpu =
+            ctx_params.device && ggml_backend_dev_type(ctx_params.device) == GGML_BACKEND_DEVICE_TYPE_CPU;
+        backend_cpu = use_selected_cpu
+            ? ggml_backend_dev_init(ctx_params.device, nullptr)
+            : ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
         if (!backend_cpu) {
             throw std::runtime_error("failed to initialize CPU backend");
         }
-        if (ctx_params.use_gpu) {
+        if (ctx_params.device) {
+            if (use_selected_cpu) {
+                backend = backend_cpu;
+            } else {
+                backend = ggml_backend_dev_init(ctx_params.device, nullptr);
+                if (!backend) {
+                    throw std::runtime_error(string_format("failed to initialize %s backend", ggml_backend_dev_name(ctx_params.device)));
+                }
+            }
+        } else if (ctx_params.use_gpu) {
             auto * backend_name = std::getenv("MTMD_BACKEND_DEVICE");
             if (backend_name != nullptr) {
                 backend = ggml_backend_init_by_name(backend_name, nullptr);
@@ -196,8 +209,10 @@ struct clip_ctx {
 
         if (backend) {
             LOG_INF("%s: CLIP using %s backend\n", __func__, ggml_backend_name(backend));
-            backend_ptrs.push_back(backend);
-            backend_buft.push_back(ggml_backend_get_default_buffer_type(backend));
+            if (backend != backend_cpu) {
+                backend_ptrs.push_back(backend);
+                backend_buft.push_back(ggml_backend_get_default_buffer_type(backend));
+            }
         } else {
             backend = backend_cpu;
             LOG_INF("%s: CLIP using CPU backend\n", __func__);

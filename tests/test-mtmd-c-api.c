@@ -9,6 +9,7 @@ int main(void) {
     printf("--------\n\n");
 
     struct mtmd_context_params params = mtmd_context_params_default();
+    assert(params.device == NULL);
     printf("Default image marker: %s\n", params.image_marker);
 
     mtmd_input_chunks * chunks = mtmd_test_create_input_chunks();
