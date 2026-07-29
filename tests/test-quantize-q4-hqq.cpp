@@ -473,8 +473,8 @@ int main(void) {
             printf("CPU trait vec_dot_type != Q8_0: FAILED\n");
             ok = false;
         }
-        if (cpu_traits->nrows != 1) {
-            printf("CPU trait nrows != 1: FAILED\n");
+        if (cpu_traits->nrows != 1 && cpu_traits->nrows != 2) {
+            printf("CPU trait nrows = %d, expected 1 or 2: FAILED\n", (int) cpu_traits->nrows);
             ok = false;
         }
         printf("%-40s: %s\n", "CPU traits (from_float, vec_dot, vec_dot_type, nrows)", RESULT_STR[!ok]);
@@ -522,15 +522,15 @@ int main(void) {
 
         float err = fabsf(dot_via_vec - ref);
         float scalar_err = fabsf(dot_scalar - ref);
-        float avx2_scalar_err = fabsf(dot_via_vec - dot_scalar);
+        float optimized_scalar_err = fabsf(dot_via_vec - dot_scalar);
         float tol = fmaxf(1.0e-4f, fabsf(ref) * 1.0e-4f);
-        bool ok = (err <= tol) && (scalar_err <= tol) && (avx2_scalar_err <= tol);
+        bool ok = (err <= tol) && (scalar_err <= tol) && (optimized_scalar_err <= tol);
         if (!ok) {
-            printf("%-40s avx2=%f scalar=%f ref=%f avx2_err=%f scalar_err=%f cross_err=%f tol=%f: FAILED\n",
-                   label, dot_via_vec, dot_scalar, ref, err, scalar_err, avx2_scalar_err, tol);
+            printf("%-40s optimized=%f scalar=%f ref=%f optimized_err=%f scalar_err=%f cross_err=%f tol=%f: FAILED\n",
+                   label, dot_via_vec, dot_scalar, ref, err, scalar_err, optimized_scalar_err, tol);
         } else {
-            printf("%-40s avx2=%f scalar=%f ref=%f cross_err=%f tol=%f: ok\n",
-                   label, dot_via_vec, dot_scalar, ref, avx2_scalar_err, tol);
+            printf("%-40s optimized=%f scalar=%f ref=%f cross_err=%f tol=%f: ok\n",
+                   label, dot_via_vec, dot_scalar, ref, optimized_scalar_err, tol);
         }
         return ok ? 0 : 1;
     };
@@ -620,6 +620,76 @@ int main(void) {
             b[i] = (float)(rand() % 20000 - 10000) / 100.0f;
         }
         num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot 2 blocks (64 elts)");
+    }
+
+    // Five blocks exercise all independent AVX2 accumulators and the tail path
+    {
+        const int n = 160;
+        srand(84);
+        std::vector<float> a(n), b(n);
+        for (int i = 0; i < n; i++) {
+            a[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+            b[i] = (float)(rand() % 20000 - 10000) / 100.0f;
+        }
+        num_failed += dot_q4_hqq_vs_f32(a.data(), b.data(), n, "dot 5 blocks (160 elts)");
+    }
+
+    // Two weight rows x two activation rows exercise the AVX2 nrc=2 path
+    {
+        const auto * q4_traits = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
+        if (q4_traits->nrows != 2) {
+            printf("%-40s: ok (not supported by this build)\n", "dot nrc=2 (2x2, 5 blocks)");
+        } else {
+            const int          n           = 160;
+            const size_t       row_size_q4 = ggml_row_size(GGML_TYPE_Q4_HQQ, n);
+            const size_t       row_size_q8 = ggml_row_size(GGML_TYPE_Q8_0, n);
+            std::vector<float> data_q4(2 * n), data_q8(2 * n);
+
+            for (int i = 0; i < 32; ++i) {
+                data_q4[i] = -0.1f + (float) i / 31.0f;
+            }
+            srand(126);
+            for (int i = 32; i < 2 * n; ++i) {
+                data_q4[i] = (float) (rand() % 20000 - 10000) / 100.0f;
+            }
+            for (int i = 0; i < n; ++i) {
+                data_q8[i]     = 100.0f;
+                data_q8[n + i] = (float) (rand() % 20000 - 10000) / 100.0f;
+            }
+
+            const auto *         q8_traits = ggml_get_type_traits(GGML_TYPE_Q8_0);
+            std::vector<uint8_t> buf_q4(2 * row_size_q4);
+            std::vector<uint8_t> buf_q8(2 * row_size_q8);
+            for (int row = 0; row < 2; ++row) {
+                q4_traits->from_float(data_q4.data() + row * n, buf_q4.data() + row * row_size_q4, n);
+                q8_traits->from_float_ref(data_q8.data() + row * n, buf_q8.data() + row * row_size_q8, n);
+            }
+
+            memset(buf_q4.data() + row_size_q4 + 4 * ggml_row_size(GGML_TYPE_Q4_HQQ, 32), 0,
+                   ggml_row_size(GGML_TYPE_Q4_HQQ, 32));
+
+            float optimized[18] = {};
+            q4_traits->vec_dot(n, optimized, 16, buf_q4.data(), row_size_q4, buf_q8.data(), row_size_q8, 2);
+
+            const float scalar[4] = {
+                dot_q4_hqq_q8_0_scalar(buf_q4.data(), buf_q8.data(), n),
+                dot_q4_hqq_q8_0_scalar(buf_q4.data() + row_size_q4, buf_q8.data(), n),
+                dot_q4_hqq_q8_0_scalar(buf_q4.data(), buf_q8.data() + row_size_q8, n),
+                dot_q4_hqq_q8_0_scalar(buf_q4.data() + row_size_q4, buf_q8.data() + row_size_q8, n),
+            };
+            const float actual[4] = { optimized[0], optimized[1], optimized[16], optimized[17] };
+
+            bool ok = true;
+            for (int i = 0; i < 4; ++i) {
+                const float tol = fmaxf(1.0e-4f, fabsf(scalar[i]) * 1.0e-4f);
+                if (fabsf(actual[i] - scalar[i]) > tol) {
+                    printf("nrc=2 output %d optimized=%f scalar=%f tol=%f: FAILED\n", i, actual[i], scalar[i], tol);
+                    ok = false;
+                }
+            }
+            printf("%-40s: %s\n", "dot nrc=2 (2x2, 5 blocks)", RESULT_STR[!ok]);
+            num_failed += !ok;
+        }
     }
 
     // Fractional-zero regression test: guarantees fractional FP16 zero point
