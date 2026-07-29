@@ -16,6 +16,58 @@
 
 static const char * RESULT_STR[] = { "ok", "FAILED" };
 
+static float dot_q4_hqq_q8_0_scalar(const void * vx, const void * vy, int n) {
+    const uint8_t * x = static_cast<const uint8_t *>(vx);
+    const uint8_t * y = static_cast<const uint8_t *>(vy);
+    const size_t q4_block_size = ggml_row_size(GGML_TYPE_Q4_HQQ, 32);
+    const size_t q8_block_size = ggml_row_size(GGML_TYPE_Q8_0, 32);
+
+    float sumf = 0.0f;
+
+    for (int ib = 0; ib < n / 32; ++ib) {
+        const uint8_t * q4 = x + ib * q4_block_size;
+        const uint8_t * q8 = y + ib * q8_block_size;
+
+        ggml_fp16_t scale_h;
+        ggml_fp16_t zero_h;
+        ggml_fp16_t d8_h;
+        memcpy(&scale_h, q4 + 0, sizeof(scale_h));
+        memcpy(&zero_h,  q4 + 2, sizeof(zero_h));
+        memcpy(&d8_h,   q8 + 0, sizeof(d8_h));
+
+        if (scale_h == 0 && zero_h == 0) {
+            bool all_zero = true;
+            for (int j = 0; j < 16; ++j) {
+                if (q4[4 + j] != 0) {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if (all_zero) {
+                continue;
+            }
+        }
+
+        int sumi = 0;
+        int sumq8 = 0;
+        for (int j = 0; j < 16; ++j) {
+            const int q4_lo = q4[4 + j] & 0x0f;
+            const int q4_hi = q4[4 + j] >> 4;
+            const int q8_lo = static_cast<int8_t>(q8[2 + j]);
+            const int q8_hi = static_cast<int8_t>(q8[2 + 16 + j]);
+            sumi += q4_lo * q8_lo + q4_hi * q8_hi;
+            sumq8 += q8_lo + q8_hi;
+        }
+
+        const float scale = ggml_fp16_to_fp32(scale_h);
+        const float zero  = ggml_fp16_to_fp32(zero_h);
+        const float d8    = ggml_fp16_to_fp32(d8_h);
+        sumf += d8 / scale * ((float) sumi - zero * (float) sumq8);
+    }
+
+    return sumf;
+}
+
 static float calc_tolerance(const float * data, int n) {
     float min_val = data[0], max_val = data[0];
     for (int i = 1; i < n; i++) {
@@ -458,21 +510,27 @@ int main(void) {
         for (int i = 0; i < n; i++) ref += deq_q4[i] * deq_q8[i];
 
         float dot_via_vec = 0.0f;
+        float dot_scalar = 0.0f;
         const auto * cpu_traits = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
         if (cpu_traits->vec_dot) {
             cpu_traits->vec_dot(n, &dot_via_vec, 0, buf_q4.data(), 0, buf_q8.data(), 0, 1);
+            dot_scalar = dot_q4_hqq_q8_0_scalar(buf_q4.data(), buf_q8.data(), n);
         } else {
             printf("vec_dot not registered for Q4_HQQ\n");
             return 1;
         }
 
         float err = fabsf(dot_via_vec - ref);
+        float scalar_err = fabsf(dot_scalar - ref);
+        float avx2_scalar_err = fabsf(dot_via_vec - dot_scalar);
         float tol = fmaxf(1.0e-4f, fabsf(ref) * 1.0e-4f);
-        bool ok = (err <= tol);
+        bool ok = (err <= tol) && (scalar_err <= tol) && (avx2_scalar_err <= tol);
         if (!ok) {
-            printf("%-40s vec_dot=%f ref=%f err=%f tol=%f: FAILED\n", label, dot_via_vec, ref, err, tol);
+            printf("%-40s avx2=%f scalar=%f ref=%f avx2_err=%f scalar_err=%f cross_err=%f tol=%f: FAILED\n",
+                   label, dot_via_vec, dot_scalar, ref, err, scalar_err, avx2_scalar_err, tol);
         } else {
-            printf("%-40s vec_dot=%f ref=%f err=%f tol=%f: ok\n", label, dot_via_vec, ref, err, tol);
+            printf("%-40s avx2=%f scalar=%f ref=%f cross_err=%f tol=%f: ok\n",
+                   label, dot_via_vec, dot_scalar, ref, avx2_scalar_err, tol);
         }
         return ok ? 0 : 1;
     };
@@ -625,18 +683,22 @@ int main(void) {
         }
 
         float dot_via_vec = 0.0f;
+        float dot_scalar = 0.0f;
         qfns_cpu->vec_dot(n, &dot_via_vec, 0, buf_q4.data(), 0, buf_q8.data(), 0, 1);
+        dot_scalar = dot_q4_hqq_q8_0_scalar(buf_q4.data(), buf_q8.data(), n);
 
         float err_correct = fabsf(dot_via_vec - ref_correct);
+        float scalar_err_correct = fabsf(dot_scalar - ref_correct);
+        float avx2_scalar_err = fabsf(dot_via_vec - dot_scalar);
         float err_broken   = fabsf(dot_via_vec - ref_broken);
         float tol = fmaxf(1.0e-4f, fabsf(ref_correct) * 1.0e-4f);
 
-        bool match_correct = (err_correct <= tol);
+        bool match_correct = (err_correct <= tol) && (scalar_err_correct <= tol) && (avx2_scalar_err <= tol);
         bool differs_from_broken = (err_broken > tol * 10.0f);
 
         if (!match_correct) {
-            printf("fractional-zero: vec_dot=%f ref=%f err=%f tol=%f: FAILED (does not match correct ref)\n",
-                   dot_via_vec, ref_correct, err_correct, tol);
+            printf("fractional-zero: avx2=%f scalar=%f ref=%f avx2_err=%f scalar_err=%f cross_err=%f tol=%f: FAILED\n",
+                   dot_via_vec, dot_scalar, ref_correct, err_correct, scalar_err_correct, avx2_scalar_err, tol);
             num_failed++;
         }
         if (!differs_from_broken) {
@@ -645,8 +707,8 @@ int main(void) {
             num_failed++;
         }
         if (match_correct && differs_from_broken) {
-            printf("%-40s vec_dot=%f correct=%f broken=%f: ok\n", "dot fractional-zero regression",
-                   dot_via_vec, ref_correct, ref_broken);
+            printf("%-40s avx2=%f scalar=%f correct=%f broken=%f: ok\n", "dot fractional-zero regression",
+                   dot_via_vec, dot_scalar, ref_correct, ref_broken);
         }
     }
 
@@ -670,20 +732,25 @@ int main(void) {
         memset(&manual_q8[2], 1, 32);
 
         float dot_via_vec = 0.0f;
+        float dot_scalar = 0.0f;
         const auto * qfns_cpu = ggml_get_type_traits_cpu(GGML_TYPE_Q4_HQQ);
         qfns_cpu->vec_dot(n, &dot_via_vec, 0, manual_q4.data(), 0, manual_q8.data(), 0, 1);
+        dot_scalar = dot_q4_hqq_q8_0_scalar(manual_q4.data(), manual_q8.data(), n);
 
         float expected = 10.0f;
         float broken   = 12.0f;
         float err = fabsf(dot_via_vec - expected);
+        float scalar_err = fabsf(dot_scalar - expected);
+        float avx2_scalar_err = fabsf(dot_via_vec - dot_scalar);
         float err_broken = fabsf(dot_via_vec - broken);
-        bool ok = (err < 1.0e-4f) && (err_broken > 1.0f);
+        bool ok = (err < 1.0e-4f) && (scalar_err < 1.0e-4f) && (avx2_scalar_err < 1.0e-4f) && (err_broken > 1.0f);
         if (!ok) {
-            printf("manual-block: vec_dot=%f expected=%f broken=%f: FAILED\n", dot_via_vec, expected, broken);
+            printf("manual-block: avx2=%f scalar=%f expected=%f broken=%f: FAILED\n",
+                   dot_via_vec, dot_scalar, expected, broken);
             num_failed++;
         } else {
-            printf("%-40s vec_dot=%f expected=%f broken=%f: ok\n", "dot manual constant block (int-zero fail)",
-                   dot_via_vec, expected, broken);
+            printf("%-40s avx2=%f scalar=%f expected=%f broken=%f: ok\n", "dot manual constant block (int-zero fail)",
+                   dot_via_vec, dot_scalar, expected, broken);
         }
     }
 

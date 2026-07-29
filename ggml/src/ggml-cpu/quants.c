@@ -1338,7 +1338,73 @@ void ggml_vec_dot_q4_hqq_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,
 }
 
 void ggml_vec_dot_q4_hqq_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
+#if defined(__AVX2__)
+    assert(n % QK4_HQQ == 0);
+    assert(nrc == 1);
+    UNUSED(nrc);
+    UNUSED(bx);
+    UNUSED(by);
+    UNUSED(bs);
+    static_assert(QK4_HQQ == QK8_0, "QK4_HQQ and QK8_0 must be the same");
+
+    const block_q4_hqq * GGML_RESTRICT x = vx;
+    const block_q8_0   * GGML_RESTRICT y = vy;
+
+    const int nb = n / QK8_0;
+    const __m256i ones_8  = _mm256_set1_epi8(1);
+    const __m256i ones_16 = _mm256_set1_epi16(1);
+    const __m256i low_mask = _mm256_set1_epi8(0x0f);
+
+    float sumf = 0;
+
+    for (int i = 0; i < nb; ++i) {
+        if (x[i].scale == 0 && x[i].zero == 0) {
+            bool all_zero = true;
+            for (int j = 0; j < QK4_HQQ/2; ++j) {
+                if (x[i].qs[j] != 0) {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if (all_zero) {
+                continue;
+            }
+        }
+
+        const __m128i packed = _mm_loadu_si128((const __m128i *) x[i].qs);
+        const __m256i q4 = _mm256_and_si256(
+                low_mask,
+                _mm256_insertf128_si256(_mm256_castsi128_si256(packed), _mm_srli_epi16(packed, 4), 1));
+        const __m256i q8 = _mm256_loadu_si256((const __m256i *) y[i].qs);
+
+        const __m256i products = _mm256_maddubs_epi16(q4, q8);
+        const __m256i sumi_32 = _mm256_madd_epi16(products, ones_16);
+        const __m256i sumq8_16 = _mm256_maddubs_epi16(ones_8, q8);
+        const __m256i sumq8_32 = _mm256_madd_epi16(sumq8_16, ones_16);
+
+        const __m128i sumi_128 = _mm_add_epi32(
+                _mm256_castsi256_si128(sumi_32), _mm256_extracti128_si256(sumi_32, 1));
+        const __m128i sumq8_128 = _mm_add_epi32(
+                _mm256_castsi256_si128(sumq8_32), _mm256_extracti128_si256(sumq8_32, 1));
+
+        const __m128i sumi_64 = _mm_add_epi32(sumi_128, _mm_unpackhi_epi64(sumi_128, sumi_128));
+        const __m128i sumq8_64 = _mm_add_epi32(sumq8_128, _mm_unpackhi_epi64(sumq8_128, sumq8_128));
+        const int sumi = _mm_cvtsi128_si32(_mm_add_epi32(
+                sumi_64, _mm_shuffle_epi32(sumi_64, _MM_SHUFFLE(2, 3, 0, 1))));
+        const int sumq8 = _mm_cvtsi128_si32(_mm_add_epi32(
+                sumq8_64, _mm_shuffle_epi32(sumq8_64, _MM_SHUFFLE(2, 3, 0, 1))));
+
+        const float d8     = GGML_CPU_FP16_TO_FP32(y[i].d);
+        const float scale4 = GGML_CPU_FP16_TO_FP32(x[i].scale);
+        const float zero4  = GGML_CPU_FP16_TO_FP32(x[i].zero);
+
+        sumf += d8 / scale4 * ((float) sumi - zero4 * (float) sumq8);
+    }
+
+    *s = sumf;
+#else
     ggml_vec_dot_q4_hqq_q8_0_generic(n, s, bs, vx, bx, vy, by, nrc);
+#endif
 }
 
 void ggml_vec_dot_iq4_xs_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
