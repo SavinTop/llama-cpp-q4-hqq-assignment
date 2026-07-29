@@ -2961,6 +2961,9 @@ struct test_cpy : public test_case {
         if (type_src == type_dst) {
             return 0.0;
         }
+        if (type_dst == GGML_TYPE_Q4_HQQ) {
+            return 1e-4;
+        }
         if (type_dst == GGML_TYPE_Q4_0 || type_dst == GGML_TYPE_Q4_1 || type_dst == GGML_TYPE_IQ4_NL ||
             type_dst == GGML_TYPE_Q5_0 || type_dst == GGML_TYPE_Q5_1 || type_dst == GGML_TYPE_Q8_0) {
             // estimate what the max nmse error would be if one quantized value is
@@ -3049,6 +3052,53 @@ struct test_cpy : public test_case {
         for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
             // test extended range of values to check if casting between f32 and i32 is consistent
             init_tensor_uniform(t, -150.f, 150.f);
+        }
+    }
+};
+
+struct test_cpy_q4_hqq_metadata : public test_cpy {
+    const std::string data_pattern;
+
+    test_cpy_q4_hqq_metadata(std::string data_pattern)
+        : test_cpy(GGML_TYPE_F32, GGML_TYPE_Q4_HQQ, {32, 1, 1, 1}), data_pattern(std::move(data_pattern)) {}
+
+    std::string vars() override {
+        return test_cpy::vars() + "," + VAR_TO_STR(data_pattern);
+    }
+
+    double err(const float * a, const float * b, size_t n) override {
+        double max_abs_diff = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            max_abs_diff = std::max(max_abs_diff, double(std::abs(a[i] - b[i])));
+        }
+        return max_abs_diff;
+    }
+
+    double max_err() override {
+        return 1e-6;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        test_cpy::initialize_tensors(ctx);
+
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
+            if (t->type != GGML_TYPE_F32 || strcmp(t->name, "src") != 0) {
+                continue;
+            }
+
+            std::vector<float> data(ggml_nelements(t));
+            for (size_t i = 0; i < data.size(); ++i) {
+                if (data_pattern == "tiny") {
+                    data[i] = float(i) * 1e-9f;
+                } else if (data_pattern == "offset") {
+                    data[i] = 10000.0f + float(i) * 0.003f;
+                } else if (data_pattern == "constant") {
+                    data[i] = 100000.0f;
+                } else {
+                    GGML_ABORT("invalid Q4_HQQ CPY data pattern");
+                }
+            }
+            ggml_backend_tensor_set(t, data.data(), 0, data.size() * sizeof(float));
         }
     }
 };
@@ -8818,16 +8868,22 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_MXFP4, GGML_TYPE_F32, 2880, 32, 2880, {1, 1}, {1, 1}));
 
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, 16, 1, 256, {1, 1}, {1, 1}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, 64, 8, 256, {1, 1}, {1, 1}));
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, 3072, 39, 3072, {1, 1}, {1, 1}));
 
-    // Targeted CPU Q4_HQQ cache-write (F32 -> Q4_HQQ) and read-back (Q4_HQQ -> F32)
+    // Targeted Q4_HQQ cache-write (F32 -> Q4_HQQ) and read-back (Q4_HQQ -> F32)
     test_cases.emplace_back(new test_cpy(GGML_TYPE_F32,  GGML_TYPE_Q4_HQQ, {256, 4, 4, 4}));
     test_cases.emplace_back(new test_cpy(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, {256, 4, 4, 4}));
     test_cases.emplace_back(new test_cpy(GGML_TYPE_F32,  GGML_TYPE_Q4_HQQ, {8192, 512, 2, 1}));
     test_cases.emplace_back(new test_cpy(GGML_TYPE_Q4_HQQ, GGML_TYPE_F32, {8192, 512, 2, 1}));
+    test_cases.emplace_back(new test_cpy_q4_hqq_metadata("tiny"));
+    test_cases.emplace_back(new test_cpy_q4_hqq_metadata("offset"));
+    test_cases.emplace_back(new test_cpy_q4_hqq_metadata("constant"));
 
-    // Narrow CPU FLASH_ATTN_EXT with Q4_HQQ cache
+    // Narrow FLASH_ATTN_EXT coverage for Q4_HQQ in K, V, and both caches.
     test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_Q4_HQQ));
     test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_F16));
+    test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_Q4_HQQ));
 
 
 #if 0

@@ -28,6 +28,9 @@ layout (binding = 2) readonly buffer V_PACKED_Q5_1 { block_q5_1_packed16 data[];
 layout (binding = 1) readonly buffer K_PACKED_Q8_0 { block_q8_0_packed16 data[]; } k_packed_q8_0;
 layout (binding = 2) readonly buffer V_PACKED_Q8_0 { block_q8_0_packed16 data[]; } v_packed_q8_0;
 
+layout (binding = 1) readonly buffer K_PACKED_Q4_HQQ { block_q4_hqq_packed16 data[]; } k_packed_q4_hqq;
+layout (binding = 2) readonly buffer V_PACKED_Q4_HQQ { block_q4_hqq_packed16 data[]; } v_packed_q4_hqq;
+
 layout (binding = 1) readonly buffer K_PACKED_BF16 { u16vec4 data[]; } k_packed_bf16;
 layout (binding = 2) readonly buffer V_PACKED_BF16 { u16vec4 data[]; } v_packed_bf16;
 
@@ -105,6 +108,22 @@ layout (binding = 1) readonly buffer K_PACKED_Q5_1_P32 { block_q5_1_packed32 dat
 #define FA_DEQUANT4_BF16(BUF) \
     return FLOAT_TYPEV4(bf16_to_fp32(uvec4(BUF.data[(a_offset + ib) / 4])));
 
+#define FA_DEQUANT4_Q4_HQQ(BUF) {                                                               \
+    FLOAT_TYPE scale = FLOAT_TYPE(BUF.data[a_offset + ib].scale);                               \
+    if (scale == FLOAT_TYPE(0.0f)) {                                                            \
+        return FLOAT_TYPEV4(0.0f);                                                              \
+    }                                                                                           \
+    uint vui_lo = uint(BUF.data[a_offset + ib].qs[(iqs & 0xF) / 2 + 0]);                        \
+    uint vui_hi = uint(BUF.data[a_offset + ib].qs[(iqs & 0xF) / 2 + 1]);                        \
+    uint shift = (iqs & 0x10) >> 2;                                                             \
+    vui_lo >>= shift;                                                                           \
+    vui_hi >>= shift;                                                                           \
+    FLOAT_TYPEV4 nibbles = FLOAT_TYPEV4(vui_lo & 0xF, (vui_lo >> 8) & 0xF,                      \
+                                        vui_hi & 0xF, (vui_hi >> 8) & 0xF);                     \
+    FLOAT_TYPE zero = FLOAT_TYPE(BUF.data[a_offset + ib].zero);                                 \
+    return (nibbles - zero) / scale;                                                             \
+}
+
 FLOAT_TYPEV4 dequantize4(uint ib, uint iqs, uint a_offset, uint binding_idx) {
     if (binding_idx == BINDING_IDX_K) {
         switch (FaTypeK) {
@@ -115,6 +134,7 @@ FLOAT_TYPEV4 dequantize4(uint ib, uint iqs, uint a_offset, uint binding_idx) {
             case FA_TYPE_Q5_1: FA_DEQUANT4_Q5_1(k_packed_q5_1)
             case FA_TYPE_Q8_0: FA_DEQUANT4_Q8_0(k_packed_q8_0)
             case FA_TYPE_BF16: FA_DEQUANT4_BF16(k_packed_bf16)
+            case FA_TYPE_Q4_HQQ: FA_DEQUANT4_Q4_HQQ(k_packed_q4_hqq)
         }
     } else {
         switch (FaTypeV) {
@@ -125,6 +145,7 @@ FLOAT_TYPEV4 dequantize4(uint ib, uint iqs, uint a_offset, uint binding_idx) {
             case FA_TYPE_Q5_1: FA_DEQUANT4_Q5_1(v_packed_q5_1)
             case FA_TYPE_Q8_0: FA_DEQUANT4_Q8_0(v_packed_q8_0)
             case FA_TYPE_BF16: FA_DEQUANT4_BF16(v_packed_bf16)
+            case FA_TYPE_Q4_HQQ: FA_DEQUANT4_Q4_HQQ(v_packed_q4_hqq)
         }
     }
     return FLOAT_TYPEV4(0);
