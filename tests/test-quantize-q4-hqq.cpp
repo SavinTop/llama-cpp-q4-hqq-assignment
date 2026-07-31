@@ -1,5 +1,8 @@
 ﻿#include "ggml.h"
 #include "ggml-cpu.h"
+#include "ggml-cpp.h"
+#include "llama.h"
+#include "../src/llama-ext.h"
 
 #undef NDEBUG
 #include <assert.h>
@@ -336,12 +339,44 @@ static int test_large_offset_small_range(void) {
     return num_failed;
 }
 
+static int test_default_tied_token_embedding_type(void) {
+    llama_quant_model_desc desc = {};
+    desc.architecture  = "llama";
+    desc.n_embd        = 3072;
+    desc.n_ff          = 8192;
+    desc.n_layer       = 28;
+    desc.n_head        = 24;
+    desc.n_head_kv     = 8;
+    desc.n_embd_head_k = 128;
+    desc.n_embd_head_v = 128;
+
+    llama_model * model = llama_quant_model_from_metadata(&desc);
+    llama_model_quantize_params params = llama_model_quantize_default_params();
+    quantize_state_impl * qs = llama_quant_init(model, &params);
+
+    ggml_init_params ctx_params = { ggml_tensor_overhead(), nullptr, true };
+    ggml_context_ptr ctx(ggml_init(ctx_params));
+    ggml_tensor * token_embd = ggml_new_tensor_2d(ctx.get(), GGML_TYPE_F32, 3072, 128256);
+    ggml_set_name(token_embd, "token_embd.weight");
+
+    ggml_type result = GGML_TYPE_COUNT;
+    llama_quant_compute_types(qs, LLAMA_FTYPE_MOSTLY_Q4_HQQ, &token_embd, &result, 1);
+
+    llama_quant_free(qs);
+    llama_model_free(model);
+
+    const bool ok = result == GGML_TYPE_Q4_HQQ;
+    printf("%-40s: %s\n", "default tied token embedding type", RESULT_STR[!ok]);
+    return !ok;
+}
+
 int main(void) {
     ggml_cpu_init();
 
     int num_failed = 0;
 
     num_failed += test_block_layout();
+    num_failed += test_default_tied_token_embedding_type();
 
     // 32 zeros (constant)
     {
