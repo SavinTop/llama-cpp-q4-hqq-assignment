@@ -6860,9 +6860,10 @@ struct test_flash_attn_ext : public test_case {
     const ggml_type type_K;
     const ggml_type type_V;
     std::array<int32_t, 4> permute;
+    const bool zero_K;
 
     std::string vars() override {
-        return VARS_TO_STR14(hsk, hsv, nh, nr23, kv, nb, mask, sinks, max_bias, logit_softcap, prec, type_K, type_V, permute);
+        return VARS_TO_STR15(hsk, hsv, nh, nr23, kv, nb, mask, sinks, max_bias, logit_softcap, prec, type_K, type_V, permute, zero_K);
     }
 
     double max_nmse_err() override {
@@ -6878,9 +6879,10 @@ struct test_flash_attn_ext : public test_case {
 
     test_flash_attn_ext(int64_t hsk = 128, int64_t hsv = 128, int64_t nh = 32, std::array<int64_t, 2> nr23 = {1, 1}, int64_t kv = 96, int64_t nb = 8,
                         bool mask = true, bool sinks = false, float max_bias = 0.0f, float logit_softcap = 0.0f, ggml_prec prec = GGML_PREC_F32,
-                        ggml_type type_K = GGML_TYPE_F16, ggml_type type_V = GGML_TYPE_F16, std::array<int32_t, 4> permute = {0, 1, 2, 3})
+                        ggml_type type_K = GGML_TYPE_F16, ggml_type type_V = GGML_TYPE_F16, std::array<int32_t, 4> permute = {0, 1, 2, 3},
+                        bool zero_K = false)
         : hsk(hsk), hsv(hsv), nh(nh), nr23(nr23), kv(kv), nb(nb), mask(mask), sinks(sinks), max_bias(max_bias), logit_softcap(logit_softcap), prec(prec),
-          type_K(type_K), type_V(type_V), permute(permute) {}
+          type_K(type_K), type_V(type_V), permute(permute), zero_K(zero_K) {}
 
     ggml_tensor * build_graph(ggml_context * ctx) override {
         const int64_t hsk_padded = GGML_PAD(hsk, ggml_blck_size(type_K));
@@ -6953,6 +6955,9 @@ struct test_flash_attn_ext : public test_case {
                 init_tensor_uniform(t, -10.0f, 10.0f);
             } else if (strcmp(t->name, "m") == 0) {
                 init_tensor_kq_mask(t);
+            } else if (zero_K && strcmp(t->name, "k") == 0) {
+                std::vector<uint8_t> data(ggml_nbytes(t), 0);
+                ggml_backend_tensor_set(t, data.data(), 0, data.size());
             } else {
                 init_tensor_uniform(t);
             }
@@ -8891,6 +8896,7 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_Q4_HQQ));
     test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_F16));
     test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_F16, GGML_TYPE_Q4_HQQ));
+    test_cases.emplace_back(new test_flash_attn_ext(128, 128, 4, {1, 1}, 512, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_HQQ, GGML_TYPE_F16, {0, 1, 2, 3}, true));
 
 
 #if 0

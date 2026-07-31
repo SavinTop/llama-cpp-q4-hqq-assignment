@@ -50,11 +50,25 @@ int32_t get_k_qs(uint ib, uint iqs, uint a_offset) {
     }
 }
 
+bool is_q4_hqq_zero_sentinel(uint ib, uint a_offset) {
+    const uint metadata = packFloat2x16(vec2(k_packed_q4_hqq.data[a_offset + ib].scale,
+                                             k_packed_q4_hqq.data[a_offset + ib].zero));
+    uint qs = 0;
+    [[unroll]] for (uint i = 0; i < 8; ++i) {
+        qs |= uint(k_packed_q4_hqq.data[a_offset + ib].qs[i]);
+    }
+    return metadata == 0 && qs == 0;
+}
+
 // Per-block scale/min, packed as (d, m). Single-scale types (Q4_0, Q5_0, Q8_0)
 // return (d, 0) so call sites always see the same shape.
 FLOAT_TYPEV2 get_k_scale(uint ib, uint a_offset) {
     switch (FaTypeK) {
-        case FA_TYPE_Q4_HQQ: return FLOAT_TYPEV2(1.0f / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + ib].scale), -FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + ib].zero) / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + ib].scale));
+        case FA_TYPE_Q4_HQQ:
+            if (is_q4_hqq_zero_sentinel(ib, a_offset)) {
+                return FLOAT_TYPEV2(0);
+            }
+            return FLOAT_TYPEV2(1.0f / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + ib].scale), -FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + ib].zero) / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + ib].scale));
         case FA_TYPE_Q4_0: return FLOAT_TYPEV2(FLOAT_TYPE(k_packed_q4_0.data[a_offset + ib].d), 0.0);
         case FA_TYPE_Q4_1: return FLOAT_TYPEV2(k_packed_q4_1_p32.data[a_offset + ib].dm);
         case FA_TYPE_Q5_0: return FLOAT_TYPEV2(FLOAT_TYPE(k_packed_q5_0.data[a_offset + ib].d), 0.0);
@@ -109,7 +123,7 @@ void k_block_to_shmem(const uint buf_ib, const uint global_ib, const uint iqs, c
     if (iqs == 0) {
         // Q4_0/Q5_0/Q8_0 store dm.x = d; Q4_1/Q5_1 store dm = (d, m) pair.
         switch (FaTypeK) {
-            case FA_TYPE_Q4_HQQ: kblocksh[buf_ib].dm = FLOAT_TYPEV2(1.0f / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + global_ib].scale), -FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + global_ib].zero) / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + global_ib].scale)); break;
+            case FA_TYPE_Q4_HQQ: kblocksh[buf_ib].dm = is_q4_hqq_zero_sentinel(global_ib, a_offset) ? FLOAT_TYPEV2(0) : FLOAT_TYPEV2(1.0f / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + global_ib].scale), -FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + global_ib].zero) / FLOAT_TYPE(k_packed_q4_hqq.data[a_offset + global_ib].scale)); break;
             case FA_TYPE_Q4_0: kblocksh[buf_ib].dm = FLOAT_TYPEV2(FLOAT_TYPE(k_packed_q4_0.data[a_offset + global_ib].d), 0.0); break;
             case FA_TYPE_Q4_1: kblocksh[buf_ib].dm = FLOAT_TYPEV2(k_packed_q4_1_p32.data[a_offset + global_ib].dm); break;
             case FA_TYPE_Q5_0: kblocksh[buf_ib].dm = FLOAT_TYPEV2(FLOAT_TYPE(k_packed_q5_0.data[a_offset + global_ib].d), 0.0); break;
