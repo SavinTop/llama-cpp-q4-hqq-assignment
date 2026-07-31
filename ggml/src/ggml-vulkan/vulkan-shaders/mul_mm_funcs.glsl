@@ -94,8 +94,15 @@ void load_a_to_shmem(const uint pos_a, const uint row, const uint col, const uin
             const float scale = float(data_a_packed16[ib].scale);
             const float zero = float(data_a_packed16[ib].zero);
             const uint vui = uint(data_a_packed16[ib].qs[2*iqs]) | (uint(data_a_packed16[ib].qs[2*iqs + 1]) << 16);
-            const vec4 v0 = scale == 0.0f ? vec4(0.0f) : (vec4(unpack8(vui & 0x0F0F0F0F)) - zero) / scale;
-            const vec4 v1 = scale == 0.0f ? vec4(0.0f) : (vec4(unpack8((vui >> 4) & 0x0F0F0F0F)) - zero) / scale;
+            uint qs = 0;
+            [[unroll]] for (uint l = 0; l < 8; ++l) {
+                qs |= uint(data_a_packed16[ib].qs[l]);
+            }
+            const bool cleared = floatBitsToUint(float(data_a_packed16[ib].scale)) == 0u &&
+                                 floatBitsToUint(float(data_a_packed16[ib].zero)) == 0u && qs == 0;
+            const bool valid_scale = scale > 0.0f && !isinf(scale) && !isnan(scale);
+            const vec4 v0 = cleared || !valid_scale ? vec4(0.0f) : (vec4(unpack8(vui & 0x0F0F0F0F)) - zero) / scale;
+            const vec4 v1 = cleared || !valid_scale ? vec4(0.0f) : (vec4(unpack8((vui >> 4) & 0x0F0F0F0F)) - zero) / scale;
 
             buf_a[buf_idx    ] = FLOAT_TYPEV2(v0.xy);
             buf_a[buf_idx + 1] = FLOAT_TYPEV2(v0.zw);

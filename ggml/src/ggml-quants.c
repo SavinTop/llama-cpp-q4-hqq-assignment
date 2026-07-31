@@ -600,6 +600,18 @@ void dequantize_row_q4_1(const block_q4_1 * GGML_RESTRICT x, float * GGML_RESTRI
     }
 }
 
+static bool block_q4_hqq_is_zero(const block_q4_hqq * block) {
+    if (block->scale != 0 || block->zero != 0) {
+        return false;
+    }
+    for (int j = 0; j < QK4_HQQ/2; ++j) {
+        if (block->qs[j] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void dequantize_row_q4_hqq(const block_q4_hqq * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
     const int qk = QK4_HQQ;
 
@@ -608,28 +620,18 @@ void dequantize_row_q4_hqq(const block_q4_hqq * GGML_RESTRICT x, float * GGML_RE
     const int nb = k / qk;
 
     for (int i = 0; i < nb; i++) {
-        // Zero-buffer sentinel: backend KV buffers are initialized by
-        // byte-wise zeroing, producing an all-zero 20-byte block.
-        // Detect by raw FP16 bit pattern: scale==0, zero==0, all qs==0.
-        // This block represents all-zero output without 0/0.
-        // The sentinel is only for runtime KV-cache buffers, not for
-        // persisted GGUF data -- ggml_validate_row_data continues to
-        // reject scale==0 for persisted blocks.
-        if (x[i].scale == 0 && x[i].zero == 0) {
-            bool all_zero = true;
-            for (int j = 0; j < QK4_HQQ/2; ++j) {
-                if (x[i].qs[j] != 0) { all_zero = false; break; }
-            }
-            if (all_zero) {
-                for (int j = 0; j < QK4_HQQ; ++j) {
-                    y[i*QK4_HQQ + j] = 0.0f;
-                }
-                continue;
-            }
+        // Runtime-cleared K/V blocks use the exact all-zero byte pattern.
+        if (block_q4_hqq_is_zero(&x[i])) {
+            memset(y + i*QK4_HQQ, 0, QK4_HQQ * sizeof(float));
+            continue;
         }
 
         const float scale = GGML_FP16_TO_FP32(x[i].scale);
         const float zero  = GGML_FP16_TO_FP32(x[i].zero);
+        if (!(scale > 0.0f) || !isfinite(scale) || !isfinite(zero)) {
+            memset(y + i*QK4_HQQ, 0, QK4_HQQ * sizeof(float));
+            continue;
+        }
 
         for (int j = 0; j < qk/2; ++j) {
             const float d0 = (float)((x[i].qs[j] & 0x0F) - zero) / scale;
@@ -5810,7 +5812,7 @@ bool ggml_validate_row_data(enum ggml_type type, const void * data, size_t nbyte
                     }
                     const float scale_val = ggml_fp16_to_fp32(q[i].scale);
                     if (!(scale_val > 0.0f)) {
-                        fprintf(stderr, "ggml_validate_row_data: found non-positive scale %f at block %zu\n", scale_val, i);
+                        fprintf(stderr, "ggml_validate_row_data: found non-positive scale %f at block %zu\n", (double) scale_val, i);
                         return false;
                     }
                     if (!validate_fp16(q[i].zero, i)) {

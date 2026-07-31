@@ -1,4 +1,4 @@
-﻿#include "ggml.h"
+#include "ggml.h"
 #include "ggml-cpu.h"
 #include "ggml-cpp.h"
 #include "llama.h"
@@ -11,6 +11,7 @@
 #include <string.h>
 #include <vector>
 #include <cstdint>
+#include <cinttypes>
 #include <algorithm>
 
 #if defined(_MSC_VER)
@@ -142,7 +143,7 @@ static int test_block_layout(void) {
     int num_failed = 0;
     const auto * qfns = ggml_get_type_traits(GGML_TYPE_Q4_HQQ);
     bool ok = (qfns->blck_size == 32);
-    printf("block size = %d (expected 32): %s\n", qfns->blck_size, RESULT_STR[!ok]);
+    printf("block size = %" PRId64 " (expected 32): %s\n", (int64_t) qfns->blck_size, RESULT_STR[!ok]);
     num_failed += !ok;
     ok = (qfns->type_size == 20);
     printf("type size = %zu (expected 20): %s\n", qfns->type_size, RESULT_STR[!ok]);

@@ -109,10 +109,23 @@ layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufQ4_
    block_q4_hqq_packed16 block;
 };
 
+bool is_q4_hqq_zero_sentinel(const in decodeBufQ4_HQQ bl)
+{
+    if (floatBitsToUint(float(bl.block.scale)) != 0u ||
+        floatBitsToUint(float(bl.block.zero)) != 0u) {
+        return false;
+    }
+    uint qs = 0;
+    [[unroll]] for (uint i = 0; i < 8; ++i) {
+        qs |= uint(bl.block.qs[i]);
+    }
+    return qs == 0;
+}
+
 float16_t dequantFuncQ4_HQQ(const in decodeBufQ4_HQQ bl, const in uint blockCoords[2], const in uint coordInBlock[2])
 {
     const float16_t scale = bl.block.scale;
-    if (scale == float16_t(0.0)) {
+    if (is_q4_hqq_zero_sentinel(bl) || !(float(scale) > 0.0f) || isinf(float(scale)) || isnan(float(scale))) {
         return float16_t(0.0);
     }
     const float16_t zero = bl.block.zero;
@@ -129,7 +142,7 @@ float16_t dequantFuncQ4_HQQ(const in decodeBufQ4_HQQ bl, const in uint blockCoor
 f16vec4 dequantFuncQ4_HQQ_v(const in decodeBufQ4_HQQ bl, const in uint blockCoords[2], const in uint coordInBlock[2])
 {
     const float16_t scale = bl.block.scale;
-    if (scale == float16_t(0.0)) {
+    if (is_q4_hqq_zero_sentinel(bl) || !(float(scale) > 0.0f) || isinf(float(scale)) || isnan(float(scale))) {
         return f16vec4(0.0);
     }
     const float16_t zero = bl.block.zero;

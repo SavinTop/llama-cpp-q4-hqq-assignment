@@ -10432,7 +10432,6 @@ static bool ggml_vk_flash_attn_scalar_shmem_support(const vk_device& device, con
     // BF16 uses the fp32 shader (FLOAT_TYPE=float)
     const uint32_t float_type_size = (device->fp16 &&
                                       k_type != GGML_TYPE_BF16 &&
-                                      v_type != GGML_TYPE_BF16 &&
                                       k_type != GGML_TYPE_Q4_HQQ &&
                                       v_type != GGML_TYPE_Q4_HQQ) ? sizeof(ggml_fp16_t) : sizeof(float);
 
