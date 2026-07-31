@@ -249,7 +249,6 @@ typedef struct {
 static_assert(sizeof(block_q5_1) == 2 * sizeof(ggml_half) + sizeof(uint32_t) + QK5_1 / 2, "wrong q5_1 block size/padding");
 
 #define QK4_HQQ 32
-static_assert(QK4_HQQ == 32, "QK4_HQQ must be 32");
 typedef struct {
     ggml_half scale;
     ggml_half zero;

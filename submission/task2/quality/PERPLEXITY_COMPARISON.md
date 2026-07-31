@@ -1,15 +1,15 @@
-# Stage 07 comparison
+# Q4_HQQ Perplexity and SIMD Performance
 
 ## AVX2 performance
 
-The Q4_HQQ benchmark used the same model and settings as Stage 06.
+The Q4_HQQ benchmark used the same model and settings as the scalar baseline.
 
-| Test | Stage 06 scalar | Stage 07 AVX2 | Speedup |
+| Test | Scalar | AVX2 | Speedup |
 |---|---:|---:|---:|
 | pp512 | 4.67 +/- 0.13 tok/s | 19.98 +/- 0.24 tok/s | 4.28x |
 | tg128 | 3.48 +/- 0.02 tok/s | 6.15 +/- 0.23 tok/s | 1.77x |
 
-The Stage 07 values are the arithmetic mean and sample standard deviation from five repetitions.
+The AVX2 values are the arithmetic mean and sample standard deviation from five repetitions.
 
 ## Perplexity
 

@@ -12,9 +12,9 @@ The quantized model can be reproduced from the Task 1 F16 GGUF. A model binary i
 Expected final output:
 
 ```text
-File: llama-3.2-3b-instruct-q4_hqq-final.gguf
-Size: 2,016,397,760 bytes
-SHA-256: FD44187FD1BA53C383F3D7B1BD1F0D5C2FB5EA48D23526170814DE563121903E
+File: llama-3.2-3b-instruct-q4_hqq.gguf
+Size: 2,093,351,360 bytes
+SHA-256: a05262e0ccebb8990e91d8b0302806934050b8623a92065649217dd4b222e468
 ```
 
 The ordinary command must quantize `token_embd.weight` to Q4_HQQ; no token-embedding override is required.

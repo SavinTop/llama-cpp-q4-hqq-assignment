@@ -634,8 +634,8 @@ void dequantize_row_q4_hqq(const block_q4_hqq * GGML_RESTRICT x, float * GGML_RE
         }
 
         for (int j = 0; j < qk/2; ++j) {
-            const float d0 = (float)((x[i].qs[j] & 0x0F) - zero) / scale;
-            const float d1 = (float)((x[i].qs[j] >>   4) - zero) / scale;
+            const float d0 = ((x[i].qs[j] & 0x0F) - zero) / scale;
+            const float d1 = ((x[i].qs[j] >>   4) - zero) / scale;
 
             y[i*qk + j + 0   ] = d0;
             y[i*qk + j + qk/2] = d1;
@@ -2334,7 +2334,7 @@ size_t quantize_q4_1(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, 
 size_t quantize_q4_hqq(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
     GGML_UNUSED(quant_weights);
     quantize_row_q4_hqq_ref(src, dst, (int64_t)nrow * n_per_row);
-    size_t row_size = ggml_row_size(GGML_TYPE_Q4_HQQ, n_per_row);
+    const size_t row_size = ggml_row_size(GGML_TYPE_Q4_HQQ, n_per_row);
     return nrow * row_size;
 }
 

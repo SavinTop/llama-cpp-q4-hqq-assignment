@@ -51,14 +51,14 @@ int32_t get_k_qs(uint ib, uint iqs, uint a_offset) {
 }
 
 bool is_q4_hqq_zero_sentinel(uint ib, uint a_offset) {
-    const float16_t scale = k_packed_q4_hqq.data[a_offset + ib].scale;
-    const float16_t zero = k_packed_q4_hqq.data[a_offset + ib].zero;
+    const float scale = float(k_packed_q4_hqq.data[a_offset + ib].scale);
+    const float zero = float(k_packed_q4_hqq.data[a_offset + ib].zero);
     uint qs = 0;
     [[unroll]] for (uint i = 0; i < 8; ++i) {
         qs |= uint(k_packed_q4_hqq.data[a_offset + ib].qs[i]);
     }
-    return floatBitsToUint(float(scale)) == 0u &&
-           floatBitsToUint(float(zero)) == 0u && qs == 0;
+    return floatBitsToUint(scale) == 0u &&
+           floatBitsToUint(zero) == 0u && qs == 0;
 }
 
 // Per-block scale/min, packed as (d, m). Single-scale types (Q4_0, Q5_0, Q8_0)

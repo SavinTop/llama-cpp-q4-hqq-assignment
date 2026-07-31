@@ -7,12 +7,12 @@ The final ordinary Q4_HQQ quantization kept tied token embeddings fully quantize
 | Format | File size | Relative size |
 |---|---:|---:|
 | Q4_0 | 1,917,190,592 bytes | baseline |
-| Q4_HQQ | 2,016,397,760 bytes | +5.17% |
+| Q4_HQQ | 2,093,351,360 bytes | +9.19% |
 
 Final Q4_HQQ SHA-256:
 
 ```text
-FD44187FD1BA53C383F3D7B1BD1F0D5C2FB5EA48D23526170814DE563121903E
+a05262e0ccebb8990e91d8b0302806934050b8623a92065649217dd4b222e468
 ```
 
 ## Controlled Windows performance

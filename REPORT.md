@@ -4,7 +4,7 @@
 
 The assignment was implemented against `llama.cpp` revision `555881ebc8b0fc0402b30e09258a32a7bfd13c52` and validated on Windows 11, Ubuntu WSL2, and macOS on Apple M1.
 
-For Task 1, Llama 3.2 3B Instruct was downloaded from Hugging Face, converted to F16 GGUF with the repository conversion script, and quantized to Q4_0 with `llama-quantize`. The model was tested with the requested Bitcoin and Python-list prompts. Both responses were coherent. On the Windows CPU test system, prompt processing reached `77.71 +/- 4.26` tokens/s, token generation reached `8.92 +/- 0.26` tokens/s, and single-token evaluation latency was `120.5 ms`. The five-run average peak working set was approximately `3534 MiB`.
+For Task 1, Llama 3.2 3B Instruct was downloaded from Hugging Face, converted to F16 GGUF with the repository conversion script, and quantized to Q4_0 with `llama-quantize`. The model was tested with the requested Bitcoin and Python-list prompts. Both responses were coherent. On the Windows CPU test system, prompt processing reached `76.54 +/- 3.11` tokens/s (pp512), token generation reached `10.59 +/- 0.03` tokens/s (tg128), and single-token prompt evaluation latency was `101.09 ms` (pp1). The five-run average peak working set was approximately `3534 MiB`.
 
 For Task 2, a new asymmetric 4-bit quantization type, `Q4_HQQ`, was added. The implementation includes the 20-byte block structure, quantization and dequantization, Q4_HQQ x Q8_0 dot products, AVX2 execution, GGUF metadata, model loading, quantizer integration, and CLI support. Q4_HQQ was also added as a KV-cache type through `--cache-type-k q4_hqq` and `--cache-type-v q4_hqq`. Vulkan support covers model inference, tensor conversion, matrix operations, and Q4_HQQ K/V cache use with Flash Attention.
 

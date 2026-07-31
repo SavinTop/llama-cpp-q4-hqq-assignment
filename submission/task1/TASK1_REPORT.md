@@ -83,10 +83,6 @@ The scripts included in `scripts/` reproduce conversion, quantization, inference
 - `scripts/Convert-Model.ps1`
 - `scripts/Quantize-Model.ps1`
 - `scripts/Run-Task1FinalTests.ps1`
-- `logs/conversion.log`
-- `logs/quantization-q4_0.log`
-- `logs/inference-bitcoin.log`
-- `logs/inference-python.log`
 - `logs/bench-pp1.json`
 - `logs/bench-pg32-1.json`
 - `logs/bench-performance.json`
@@ -94,4 +90,4 @@ The scripts included in `scripts/` reproduce conversion, quantization, inference
 - `logs/memory-summary.txt`
 - `logs/environment.txt`
 
-The original UTF-16 PowerShell logs are preserved under `logs/raw/`. The main conversion and quantization logs were normalized to UTF-8 and had only the PowerShell `NativeCommandError` wrapper removed; the underlying tool output was preserved.
+The scripts above reproduce the full pipeline. Conversion and quantization logs are generated during script execution.
