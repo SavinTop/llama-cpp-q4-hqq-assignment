@@ -306,6 +306,7 @@ const std::vector<ggml_type> kv_cache_types = {
     GGML_TYPE_Q8_0,
     GGML_TYPE_Q4_0,
     GGML_TYPE_Q4_1,
+    GGML_TYPE_Q4_HQQ,
     GGML_TYPE_IQ4_NL,
     GGML_TYPE_Q5_0,
     GGML_TYPE_Q5_1,
@@ -2465,6 +2466,18 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.mmproj_use_gpu = value;
         }
     ).set_examples(mmproj_examples).set_env("LLAMA_ARG_MMPROJ_OFFLOAD"));
+    add_opt(common_arg(
+        {"--mmproj-backend"}, "DEVICE",
+        "device to use for multimodal projector (e.g. CPU)\n"
+        "use --list-devices to see a list of available accelerator devices",
+        [](common_params & params, const std::string & value) {
+            ggml_backend_load_all();
+            params.mmproj_backend = ggml_backend_dev_by_name(value.c_str());
+            if (!params.mmproj_backend) {
+                throw std::invalid_argument(string_format("invalid device: %s", value.c_str()));
+            }
+        }
+    ).set_examples(mmproj_examples).set_env("LLAMA_ARG_MMPROJ_BACKEND"));
     add_opt(common_arg(
         {"--image", "--audio", "--video"}, "FILE",
         "path to an image, audio, or video file. use with multimodal models, use comma-separated values for multiple files\n",

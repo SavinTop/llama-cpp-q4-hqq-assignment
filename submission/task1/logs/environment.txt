@@ -1,0 +1,57 @@
+Task 1 environment
+==================
+
+Timestamp:
+2026-07-28T12:30:25.2194466+02:00
+
+Source model:
+meta-llama/Llama-3.2-3B-Instruct
+
+llama.cpp commit:
+555881ebc8b0fc0402b30e09258a32a7bfd13c52
+
+llama-cli version:
+version: 10121 (555881ebc)
+built with MSVC 19.51.36248.0 for x64
+
+llama-bench executable:
+C:\Dev\Base\Presales\Tether\llama.cpp\build\bin\Release\llama-bench.exe
+
+Model path:
+C:\Dev\Base\Presales\Tether\llama.cpp\models\llama-3.2-3b-instruct-q4_0.gguf
+
+Model size:
+1917190592 bytes
+1.786 GiB
+
+Model SHA256:
+CAD0FC6144407850FFC131C4CCAA05C83D675735BB108090A839D145AC6AA767
+
+Backend:
+CPU
+
+CPU threads:
+10
+
+Inference context size:
+4096
+
+CPU:
+Name                      : 12th Gen Intel(R) Core(TM) i7-12650H
+NumberOfCores             : 10
+NumberOfLogicalProcessors : 16
+MaxClockSpeed             : 2300
+
+Operating system:
+Caption        : Microsoft Windows 11 Pro
+Version        : 10.0.26200
+OSArchitecture : 64-bit
+
+Installed RAM:
+31.73 GiB
+
+Relevant CMake settings:
+GGML_CUDA:BOOL=OFF
+GGML_NATIVE:BOOL=ON
+GGML_VULKAN:BOOL=OFF
+CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026

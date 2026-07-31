@@ -38,6 +38,10 @@ void quantize_row_q4_1(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, in
     quantize_row_q4_1_ref(x, y, k);
 }
 
+void quantize_row_q4_hqq(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {
+    quantize_row_q4_hqq_ref(x, y, k);
+}
+
 void quantize_row_q5_0(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {
     quantize_row_q5_0_ref(x, y, k);
 }
@@ -1277,6 +1281,62 @@ void ggml_vec_dot_iq4_nl_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs,
         }
         sumf += d * (sumi1 + sumi2);
     }
+    *s = sumf;
+}
+
+void ggml_vec_dot_q4_hqq_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
+    assert(n % QK4_HQQ == 0);
+    assert(nrc == 1);
+    UNUSED(nrc);
+    UNUSED(bx);
+    UNUSED(by);
+    UNUSED(bs);
+    static_assert(QK4_HQQ == QK8_0, "QK4_HQQ and QK8_0 must be the same");
+
+    const block_q4_hqq * GGML_RESTRICT x = vx;
+    const block_q8_0   * GGML_RESTRICT y = vy;
+
+    const int nb = n / QK8_0;
+
+    float sumf = 0;
+
+    for (int i = 0; i < nb; ++i) {
+        bool cleared = false;
+        if (x[i].scale == 0 && x[i].zero == 0) {
+            cleared = true;
+            for (int j = 0; j < QK4_HQQ/2; ++j) {
+                if (x[i].qs[j] != 0) {
+                    cleared = false;
+                    break;
+                }
+            }
+        }
+        if (cleared) {
+            continue;
+        }
+
+        const float d8      = GGML_CPU_FP16_TO_FP32(y[i].d);
+        const float scale4  = GGML_CPU_FP16_TO_FP32(x[i].scale);
+        const float zero4   = GGML_CPU_FP16_TO_FP32(x[i].zero);
+        if (!(scale4 > 0.0f) || !isfinite(scale4) || !isfinite(zero4)) {
+            continue;
+        }
+
+        int sumi = 0;
+        int sumq8 = 0;
+
+        for (int j = 0; j < QK8_0/2; ++j) {
+            const int q4_lo = (x[i].qs[j] & 0x0F);
+            const int q4_hi = (x[i].qs[j] >>   4);
+
+            sumi  += q4_lo * y[i].qs[j];
+            sumi  += q4_hi * y[i].qs[j + QK8_0/2];
+            sumq8 += y[i].qs[j] + y[i].qs[j + QK8_0/2];
+        }
+
+        sumf += d8 / scale4 * ((float)sumi - zero4 * (float)sumq8);
+    }
+
     *s = sumf;
 }
 

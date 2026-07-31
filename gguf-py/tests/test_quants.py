@@ -64,7 +64,7 @@ class GGMLQuants:
         self.libggml.ggml_quantize_requires_imatrix.argtypes = (ctypes.c_int,)
 
         for t in (
-            "q4_0", "q4_1", "q5_0", "q5_1", "q8_0",
+            "q4_0", "q4_1", "q4_hqq", "q5_0", "q5_1", "q8_0",
             "q2_K", "q3_K", "q4_K", "q5_K", "q6_K",
             "tq1_0", "tq2_0",
             "mxfp4",
@@ -142,10 +142,33 @@ def compare_tensors(t1: np.ndarray, t2: np.ndarray, qtype: GGMLQuantizationType)
         return False
 
 
+def test_q4_hqq_layout() -> None:
+    qtype = GGMLQuantizationType.Q4_HQQ
+    assert gguf.GGML_QUANT_SIZES[qtype] == (32, 20)
+
+    low = np.arange(16, dtype=np.uint8)
+    high = np.arange(15, -1, -1, dtype=np.uint8)
+    metadata = np.array([2.0, 1.5], dtype=np.float16).view(np.uint8)
+    packed = low | (high << np.uint8(4))
+    block = np.concatenate([metadata, packed])
+    expected = (np.concatenate([low, high]).astype(np.float32) - np.float32(1.5)) / np.float32(2.0)
+    np.testing.assert_array_equal(gguf.dequantize(block, qtype), expected)
+
+    constant_metadata = np.array([1.0, -3.25], dtype=np.float16).view(np.uint8)
+    constant_block = np.concatenate([constant_metadata, np.zeros(16, dtype=np.uint8)])
+    np.testing.assert_array_equal(gguf.dequantize(constant_block, qtype), np.full(32, 3.25, dtype=np.float32))
+
+    zero_sentinel = np.zeros(20, dtype=np.uint8)
+    np.testing.assert_array_equal(gguf.dequantize(zero_sentinel, qtype), np.zeros(32, dtype=np.float32))
+
+
 def do_test(libggml_path: Path, quick: bool = False, user_type: GGMLQuantizationType | None = None):
     ggml_quants = GGMLQuants(libggml_path)
 
     np.set_printoptions(precision=None, threshold=(4 * 256) + 1, formatter={"int": lambda n: "0x%02X" % n})
+
+    test_q4_hqq_layout()
+    logger.info("Q4_HQQ deterministic layout cases match")
 
     r = np.random.randn(8, 1024, 1024).astype(np.float32, copy=False)
     # test zero blocks

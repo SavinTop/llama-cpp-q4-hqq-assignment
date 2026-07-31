@@ -15,7 +15,11 @@ layout (binding = 0) readonly buffer S {S_TYPE data_s[];};
 #if defined(SET_ROWS)
 #include "generic_binary_head.glsl"
 layout (binding = 1) readonly buffer C {B_TYPE data_i[];};
+#if defined(DATA_A_Q4_HQQ)
+layout (binding = 2) buffer Q {A_TYPE data_q[];};
+#else
 layout (binding = 2) writeonly buffer Q {A_TYPE data_q[];};
+#endif
 
 #if B_SIZE == 64
 #define DATA_I_SWIZZLE .x
@@ -25,7 +29,11 @@ layout (binding = 2) writeonly buffer Q {A_TYPE data_q[];};
 
 #else
 #include "generic_unary_head.glsl"
+#if defined(DATA_A_Q4_HQQ)
+layout (binding = 1) buffer Q {A_TYPE data_q[];};
+#else
 layout (binding = 1) writeonly buffer Q {A_TYPE data_q[];};
+#endif
 #endif
 
 #if defined(DATA_A_Q4_0)
@@ -86,6 +94,99 @@ void quantize(uint dst_idx, uint src_idx)
         const uint xi1 = min(15, int(x1 + 0.5));
 
         data_q[dst_idx].qs[j]  = uint8_t(xi0 | (xi1 << 4));
+    }
+}
+#endif
+
+#if defined(DATA_A_Q4_HQQ)
+const float Q4_HQQ_FP16_MAX_FINITE = 65504.0f;
+const int Q4_HQQ_SCALE_SEARCH_MAX_ATTEMPTS = 64;
+
+float q4_hqq_store_scale(uint dst_idx, float value)
+{
+    data_q[dst_idx].scale = float16_t(value);
+    return float(data_q[dst_idx].scale);
+}
+
+float q4_hqq_store_zero(uint dst_idx, float value)
+{
+    data_q[dst_idx].zero = float16_t(value);
+    return float(data_q[dst_idx].zero);
+}
+
+bool q4_hqq_fp16_finite(float value)
+{
+    return value == value && abs(value) <= Q4_HQQ_FP16_MAX_FINITE;
+}
+
+void quantize(uint dst_idx, uint src_idx)
+{
+    float min_value = 1.0f / 0.0f; // +Inf: first finite sample reduces it
+    float max_value = -min_value;  // -Inf: first finite sample increases it
+
+    [[unroll]] for (int j = 0; j < QUANT_K_Q4_HQQ; ++j) {
+        const float v = float(data_s[src_idx + j]);
+        if (v < min_value) min_value = v;
+        if (v > max_value) max_value = v;
+    }
+
+    const bool is_constant = max_value == min_value;
+    float ideal_scale = is_constant ? 1.0f : 15.0f / (max_value - min_value);
+
+    if (is_constant) {
+        const float abs_min = abs(min_value);
+        if (abs_min > Q4_HQQ_FP16_MAX_FINITE) {
+            ideal_scale = Q4_HQQ_FP16_MAX_FINITE / abs_min;
+        }
+    }
+
+    float out_scale = q4_hqq_store_scale(dst_idx, ideal_scale);
+    float out_zero = 0.0f;
+    bool valid_metadata = false;
+
+    // Defensive upper bound: each iteration halves out_scale,
+    // so 64 attempts cover the full FP16 dynamic range.
+    for (int attempt = 0; attempt < Q4_HQQ_SCALE_SEARCH_MAX_ATTEMPTS; ++attempt) {
+        if (!(out_scale > 0.0f) || !q4_hqq_fp16_finite(out_scale)) {
+            out_scale = q4_hqq_store_scale(dst_idx, Q4_HQQ_FP16_MAX_FINITE);
+        }
+
+        out_zero = q4_hqq_store_zero(dst_idx, -min_value * out_scale);
+        if (q4_hqq_fp16_finite(out_zero)) {
+            valid_metadata = true;
+            break;
+        }
+
+        const float next_scale = q4_hqq_store_scale(dst_idx, out_scale * 0.5f);
+        if (!(next_scale > 0.0f) || !q4_hqq_fp16_finite(next_scale) || next_scale == out_scale) {
+            break;
+        }
+        out_scale = next_scale;
+    }
+
+    if (!valid_metadata) {
+        out_scale = q4_hqq_store_scale(dst_idx, 1.0f);
+        out_zero = q4_hqq_store_zero(dst_idx, 0.0f);
+    }
+
+    data_q[dst_idx].scale = float16_t(out_scale);
+    data_q[dst_idx].zero = float16_t(out_zero);
+
+    if (is_constant) {
+        [[unroll]] for (int j = 0; j < QUANT_K_Q4_HQQ/2; ++j) {
+            data_q[dst_idx].qs[j] = uint8_t(0);
+        }
+        return;
+    }
+
+    [[unroll]] for (int j = 0; j < QUANT_K_Q4_HQQ/2; ++j) {
+        const float x0 = float(data_s[src_idx + 0              + j]);
+        const float x1 = float(data_s[src_idx + QUANT_K_Q4_HQQ/2 + j]);
+        const float q0 = x0 * out_scale + out_zero;
+        const float q1 = x1 * out_scale + out_zero;
+        const uint xi0 = min(15u, uint(max(0.0f, floor(q0 + 0.5f))));
+        const uint xi1 = min(15u, uint(max(0.0f, floor(q1 + 0.5f))));
+        data_q[dst_idx].qs[j] = uint8_t(xi0 | (xi1 << 4));
     }
 }
 #endif

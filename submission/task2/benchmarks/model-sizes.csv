@@ -1,0 +1,4 @@
+﻿"Quant","Role","Bytes","MiB","Path"
+"F16","source","6433688000","6135.64","<model-dir>/llama-3.2-3b-instruct-f16.gguf"
+"Q4_0","baseline","1917190592","1828.38","<model-dir>/llama-3.2-3b-instruct-q4_0.gguf"
+"Q4_HQQ","final","2093351360","1996.38","<model-dir>/llama-3.2-3b-instruct-q4_hqq.gguf"

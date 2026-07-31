@@ -139,6 +139,36 @@ static void test(void) {
     assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMMON));
     assert(params.load_mode == LLAMA_LOAD_MODE_MMAP);
 
+    {
+        common_params mmproj_params;
+        assert(mmproj_params.mmproj_backend == nullptr);
+        assert(mmproj_params.devices.empty());
+
+        ggml_backend_load_all();
+        ggml_backend_dev_t cpu_device = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+        assert(cpu_device != nullptr);
+
+        argv = {"binary_name", "-m", "model.gguf", "--mmproj-backend", ggml_backend_dev_name(cpu_device)};
+        assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), mmproj_params, LLAMA_EXAMPLE_MTMD));
+        assert(mmproj_params.mmproj_backend == cpu_device);
+        assert(mmproj_params.devices.empty());
+
+        common_params separate_device_params;
+        argv = {"binary_name", "-m", "model.gguf", "--device", "none", "--mmproj-backend", ggml_backend_dev_name(cpu_device)};
+        assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), separate_device_params, LLAMA_EXAMPLE_MTMD));
+        assert(separate_device_params.mmproj_backend == cpu_device);
+        assert(separate_device_params.devices.size() == 1);
+        assert(separate_device_params.devices[0] == nullptr);
+
+        common_params missing_value_params;
+        argv = {"binary_name", "-m", "model.gguf", "--mmproj-backend"};
+        assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), missing_value_params, LLAMA_EXAMPLE_MTMD));
+
+        common_params invalid_device_params;
+        argv = {"binary_name", "-m", "model.gguf", "--mmproj-backend", "invalid-mmproj-device"};
+        assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), invalid_device_params, LLAMA_EXAMPLE_MTMD));
+    }
+
     argv = {"binary_name", "-lm", "mlock"};
     assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMMON));
     assert(params.load_mode == LLAMA_LOAD_MODE_MLOCK);

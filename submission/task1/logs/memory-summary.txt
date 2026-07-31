@@ -1,0 +1,11 @@
+RAM measurement summary
+=======================
+
+Independent process runs: 5
+Workload: pp512 + tg128
+CPU threads: 10
+
+Average peak working set: 3,534.18 MiB (3.451 GiB)
+Minimum peak working set: 3,534.14 MiB
+Maximum peak working set: 3,534.24 MiB
+Average peak private memory: 1,949.51 MiB

@@ -289,6 +289,26 @@ class Q4_1(__Quant, qtype=GGMLQuantizationType.Q4_1):
         return (d * qs) + m
 
 
+class Q4_HQQ(__Quant, qtype=GGMLQuantizationType.Q4_HQQ):
+    @classmethod
+    def dequantize_blocks(cls, blocks: np.ndarray) -> np.ndarray:
+        n_blocks = blocks.shape[0]
+        is_zero_sentinel = np.all(blocks == 0, axis=-1, keepdims=True)
+
+        scale, rest = np.hsplit(blocks, [2])
+        zero, qs = np.hsplit(rest, [2])
+
+        scale = scale.view(np.float16).astype(np.float32)
+        zero = zero.view(np.float16).astype(np.float32)
+
+        qs = qs.reshape((n_blocks, -1, 1, cls.block_size // 2)) >> np.array([0, 4], dtype=np.uint8).reshape((1, 1, 2, 1))
+        qs = (qs & np.uint8(0x0F)).reshape((n_blocks, -1)).astype(np.float32)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            values = (qs - zero) / scale
+        return np.where(is_zero_sentinel, np.float32(0), values).astype(np.float32)
+
+
 class Q5_0(__Quant, qtype=GGMLQuantizationType.Q5_0):
     @classmethod
     def quantize_blocks(cls, blocks: np.ndarray) -> np.ndarray:

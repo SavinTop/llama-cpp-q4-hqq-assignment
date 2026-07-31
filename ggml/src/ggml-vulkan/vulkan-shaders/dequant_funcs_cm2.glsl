@@ -105,6 +105,57 @@ layout(buffer_reference, std430, buffer_reference_align = 4) buffer decodeBufQ4_
    block_q4_1_packed32 block;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 2) buffer decodeBufQ4_HQQ {
+   block_q4_hqq_packed16 block;
+};
+
+bool is_q4_hqq_zero_sentinel(const in decodeBufQ4_HQQ bl)
+{
+    if (floatBitsToUint(float(bl.block.scale)) != 0u ||
+        floatBitsToUint(float(bl.block.zero)) != 0u) {
+        return false;
+    }
+    uint qs = 0;
+    [[unroll]] for (uint i = 0; i < 8; ++i) {
+        qs |= uint(bl.block.qs[i]);
+    }
+    return qs == 0;
+}
+
+float16_t dequantFuncQ4_HQQ(const in decodeBufQ4_HQQ bl, const in uint blockCoords[2], const in uint coordInBlock[2])
+{
+    const float16_t scale = bl.block.scale;
+    if (is_q4_hqq_zero_sentinel(bl) || !(float(scale) > 0.0f) || isinf(float(scale)) || isnan(float(scale))) {
+        return float16_t(0.0);
+    }
+    const float16_t zero = bl.block.zero;
+    const uint idx = coordInBlock[1];
+    const uint shift = (idx & 0x10) >> 2;
+    uint32_t qs = uint32_t(bl.block.qs[(idx & 0xE) >> 1]);
+    qs >>= shift;
+    qs &= 0x0F0F;
+    qs = unpack8(qs)[idx & 1];
+    float16_t ret = (float16_t(qs) - zero) / scale;
+    return ret;
+}
+
+f16vec4 dequantFuncQ4_HQQ_v(const in decodeBufQ4_HQQ bl, const in uint blockCoords[2], const in uint coordInBlock[2])
+{
+    const float16_t scale = bl.block.scale;
+    if (is_q4_hqq_zero_sentinel(bl) || !(float(scale) > 0.0f) || isinf(float(scale)) || isnan(float(scale))) {
+        return f16vec4(0.0);
+    }
+    const float16_t zero = bl.block.zero;
+    const uint idx = coordInBlock[1];
+    const uint shift = (idx & 0x10) >> 2;     // 0 or 4
+    const uint qs_i = (idx & 0xE) >> 1;       // even, in {0,2,4,6}
+    const uint qsw = uint32_t(bl.block.qs[qs_i    ])
+                   | (uint32_t(bl.block.qs[qs_i + 1u]) << 16);
+    const uint q4   = (qsw >> shift) & 0x0F0F0F0Fu;
+    const u8vec4 q  = unpack8(q4);
+    return (f16vec4(vec4(q)) - f16vec4(zero)) / f16vec4(scale);
+}
+
 float16_t dequantFuncQ4_1(const in decodeBufQ4_1 bl, const in uint blockCoords[2], const in uint coordInBlock[2])
 {
     const float16_t d = bl.block.d;
@@ -1359,6 +1410,9 @@ f16vec4 dequantFuncNVFP4_v(const in decodeBufNVFP4 bl, const in uint blockCoords
 #elif defined(DATA_A_Q4_1)
 #define dequantFuncA dequantFuncQ4_1
 #define dequantFuncA_v dequantFuncQ4_1_v
+#elif defined(DATA_A_Q4_HQQ)
+#define dequantFuncA dequantFuncQ4_HQQ
+#define dequantFuncA_v dequantFuncQ4_HQQ_v
 #elif defined(DATA_A_Q5_0)
 #define dequantFuncA dequantFuncQ5_0
 #define dequantFuncA_v dequantFuncQ5_0_v

@@ -184,6 +184,109 @@ void quantize_row_q4_1_ref(const float * GGML_RESTRICT x, block_q4_1 * GGML_REST
     }
 }
 
+void quantize_row_q4_hqq_ref(const float * GGML_RESTRICT x, block_q4_hqq * GGML_RESTRICT y, int64_t k) {
+    const int qk = QK4_HQQ;
+
+    assert(k % qk == 0);
+
+    const int nb = k / qk;
+
+    for (int i = 0; i < nb; i++) {
+        float min = FLT_MAX;
+        float max = -FLT_MAX;
+
+        for (int j = 0; j < qk; j++) {
+            const float v = x[i*qk + j];
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+
+        if (max == min) {
+            // Constant block: select a positive finite scale so that
+            // stored_zero = FP16(-min * stored_scale) is finite.
+            float scale = 1.0f;
+            float abs_min = fabsf(min);
+            if (abs_min > 65504.0f) {
+                scale = 65504.0f / abs_min;
+            }
+            y[i].scale = GGML_FP32_TO_FP16(scale);
+            float stored_s = GGML_FP16_TO_FP32(y[i].scale);
+
+            // Retry with reduced scale if zero overflows
+            while (1) {
+                float zc = -min * stored_s;
+                y[i].zero = GGML_FP32_TO_FP16(zc);
+                if (isfinite(GGML_FP16_TO_FP32(y[i].zero))) {
+                    break;
+                }
+                y[i].scale = GGML_FP32_TO_FP16(stored_s * 0.5f);
+                stored_s = GGML_FP16_TO_FP32(y[i].scale);
+                if (!isfinite(stored_s) || stored_s <= 0.0f) {
+                    y[i].scale = GGML_FP32_TO_FP16(1.0f);
+                    y[i].zero  = GGML_FP32_TO_FP16(0.0f);
+                    break;
+                }
+            }
+
+            memset(y[i].qs, 0, qk/2);
+            continue;
+        }
+
+        // Ideal scale mapping [min, max] to codes [0, 15]
+        float scale_f = 15.0f / (max - min);
+        y[i].scale = GGML_FP32_TO_FP16(scale_f);
+        scale_f = GGML_FP16_TO_FP32(y[i].scale);
+
+        // Reduce scale until both stored scale and stored zero are finite
+        while (1) {
+            if (!isfinite(scale_f) || scale_f <= 0.0f) {
+                scale_f = 65504.0f;
+                y[i].scale = GGML_FP32_TO_FP16(scale_f);
+                scale_f = GGML_FP16_TO_FP32(y[i].scale);
+            }
+
+            float zc = -min * scale_f;
+            y[i].zero = GGML_FP32_TO_FP16(zc);
+            if (isfinite(GGML_FP16_TO_FP32(y[i].zero))) {
+                break;
+            }
+
+            // Zero overflowed FP16; try reducing scale
+            float next = scale_f * 0.5f;
+            y[i].scale = GGML_FP32_TO_FP16(next);
+            float next_f = GGML_FP16_TO_FP32(y[i].scale);
+            if (next_f == scale_f || next_f <= 0.0f) {
+                // Cannot reduce further; documented finite fallback
+                y[i].scale = GGML_FP32_TO_FP16(1.0f);
+                y[i].zero  = GGML_FP32_TO_FP16(0.0f);
+                break;
+            }
+            scale_f = next_f;
+        }
+
+        const float scale_use = GGML_FP16_TO_FP32(y[i].scale);
+        const float zero_use  = GGML_FP16_TO_FP32(y[i].zero);
+
+        assert(isfinite(scale_use) && scale_use > 0.0f && isfinite(zero_use));
+
+        for (int j = 0; j < qk/2; ++j) {
+            const float x0 = x[i*qk + 0    + j];
+            const float x1 = x[i*qk + qk/2 + j];
+
+            int q0 = (int)roundf(x0 * scale_use + zero_use);
+            int q1 = (int)roundf(x1 * scale_use + zero_use);
+
+            if (q0 < 0)  { q0 = 0; }
+            if (q0 > 15) { q0 = 15; }
+            if (q1 < 0)  { q1 = 0; }
+            if (q1 > 15) { q1 = 15; }
+
+            y[i].qs[j]  = (uint8_t)(q0);
+            y[i].qs[j] |= (uint8_t)(q1) << 4;
+        }
+    }
+}
+
 void quantize_row_q5_0_ref(const float * GGML_RESTRICT x, block_q5_0 * GGML_RESTRICT y, int64_t k) {
     static const int qk = QK5_0;
 
@@ -493,6 +596,49 @@ void dequantize_row_q4_1(const block_q4_1 * GGML_RESTRICT x, float * GGML_RESTRI
 
             y[i*qk + j + 0   ] = x0*d + m;
             y[i*qk + j + qk/2] = x1*d + m;
+        }
+    }
+}
+
+static bool block_q4_hqq_is_zero(const block_q4_hqq * block) {
+    if (block->scale != 0 || block->zero != 0) {
+        return false;
+    }
+    for (int j = 0; j < QK4_HQQ/2; ++j) {
+        if (block->qs[j] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void dequantize_row_q4_hqq(const block_q4_hqq * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    const int qk = QK4_HQQ;
+
+    assert(k % qk == 0);
+
+    const int nb = k / qk;
+
+    for (int i = 0; i < nb; i++) {
+        // Runtime-cleared K/V blocks use the exact all-zero byte pattern.
+        if (block_q4_hqq_is_zero(&x[i])) {
+            memset(y + i*QK4_HQQ, 0, QK4_HQQ * sizeof(float));
+            continue;
+        }
+
+        const float scale = GGML_FP16_TO_FP32(x[i].scale);
+        const float zero  = GGML_FP16_TO_FP32(x[i].zero);
+        if (!(scale > 0.0f) || !isfinite(scale) || !isfinite(zero)) {
+            memset(y + i*QK4_HQQ, 0, QK4_HQQ * sizeof(float));
+            continue;
+        }
+
+        for (int j = 0; j < qk/2; ++j) {
+            const float d0 = ((x[i].qs[j] & 0x0F) - zero) / scale;
+            const float d1 = ((x[i].qs[j] >>   4) - zero) / scale;
+
+            y[i*qk + j + 0   ] = d0;
+            y[i*qk + j + qk/2] = d1;
         }
     }
 }
@@ -2182,6 +2328,13 @@ size_t quantize_q4_1(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, 
         src += n_per_row;
         qrow += row_size;
     }
+    return nrow * row_size;
+}
+
+size_t quantize_q4_hqq(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
+    GGML_UNUSED(quant_weights);
+    quantize_row_q4_hqq_ref(src, dst, (int64_t)nrow * n_per_row);
+    const size_t row_size = ggml_row_size(GGML_TYPE_Q4_HQQ, n_per_row);
     return nrow * row_size;
 }
 
@@ -5648,6 +5801,24 @@ bool ggml_validate_row_data(enum ggml_type type, const void * data, size_t nbyte
         case GGML_TYPE_IQ4_NL:
             {
                 VALIDATE_ROW_DATA_D_F16_IMPL(block_iq4_nl, data, nb);
+            } break;
+
+        case GGML_TYPE_Q4_HQQ:
+            {
+                const block_q4_hqq * q = (const block_q4_hqq *) data;
+                for (size_t i = 0; i < nb; ++i) {
+                    if (!validate_fp16(q[i].scale, i)) {
+                        return false;
+                    }
+                    const float scale_val = ggml_fp16_to_fp32(q[i].scale);
+                    if (!(scale_val > 0.0f)) {
+                        fprintf(stderr, "ggml_validate_row_data: found non-positive scale %f at block %zu\n", (double) scale_val, i);
+                        return false;
+                    }
+                    if (!validate_fp16(q[i].zero, i)) {
+                        return false;
+                    }
+                }
             } break;
 
         case GGML_TYPE_I8:

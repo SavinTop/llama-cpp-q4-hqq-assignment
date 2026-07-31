@@ -592,6 +592,7 @@ struct common_params {
 
     // multimodal models (see tools/mtmd)
     struct common_params_model mmproj;
+    ggml_backend_dev_t mmproj_backend = nullptr; // device to use for multimodal projector
     bool mmproj_use_gpu = true;     // use GPU for multimodal model
     bool no_mmproj = false;         // explicitly disable multimodal model
     std::vector<std::string> image; // path to image file(s) ; TODO: change the name to "media"

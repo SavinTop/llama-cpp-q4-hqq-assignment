@@ -61,6 +61,17 @@ vec4 dequantize4_2aligned(uint ib, uint iqs, uint a_offset) {
 }
 #endif
 
+#if defined(DATA_A_Q4_HQQ)
+vec2 dequantize(uint ib, uint iqs, uint a_offset) {
+    const uint vui = uint(data_a[a_offset + ib].qs[iqs]);
+    return vec2(vui & 0xF, vui >> 4);
+}
+vec4 dequantize4(uint ib, uint iqs, uint a_offset) {
+    const uint vui = uint(data_a_packed16[a_offset + ib].qs[iqs/2]);
+    return vec4(vui & 0xF, (vui >> 4) & 0xF, (vui >> 8) & 0xF, vui >> 12);
+}
+#endif
+
 #if defined(DATA_A_Q4_0)
 vec2 dequantize(uint ib, uint iqs, uint a_offset) {
     const uint vui = uint(data_a[a_offset + ib].qs[iqs]);
@@ -561,6 +572,32 @@ vec2 get_dm(uint ib, uint a_offset) {
 #if defined(DATA_A_Q2_0) || defined(DATA_A_Q4_0) || defined(DATA_A_Q5_0) || defined(DATA_A_Q8_0) || defined(DATA_A_IQ1_S) || defined(DATA_A_IQ2_XXS) || defined(DATA_A_IQ2_XS) || defined(DATA_A_IQ2_S) || defined(DATA_A_IQ3_XXS) || defined(DATA_A_IQ3_S) || defined(DATA_A_IQ4_XS) || defined(DATA_A_IQ4_NL)
 vec2 get_dm(uint ib, uint a_offset) {
     return vec2(float(data_a[a_offset + ib].d), 0);
+}
+#endif
+
+#if defined(DATA_A_Q4_HQQ)
+bool is_q4_hqq_zero_sentinel(uint ib, uint a_offset) {
+    if (floatBitsToUint(float(data_a[a_offset + ib].scale)) != 0u ||
+        floatBitsToUint(float(data_a[a_offset + ib].zero)) != 0u) {
+        return false;
+    }
+    uint qs = 0;
+    [[unroll]] for (uint i = 0; i < 16; ++i) {
+        qs |= uint(data_a[a_offset + ib].qs[i]);
+    }
+    return qs == 0;
+}
+
+vec2 get_dm(uint ib, uint a_offset) {
+    if (is_q4_hqq_zero_sentinel(ib, a_offset)) {
+        return vec2(0.0f);
+    }
+    const float scale = float(data_a[a_offset + ib].scale);
+    if (!(scale > 0.0f) || isinf(scale) || isnan(scale)) {
+        return vec2(0.0f);
+    }
+    const float zero = float(data_a[a_offset + ib].zero);
+    return vec2(1.0f / scale, -zero / scale);
 }
 #endif
 

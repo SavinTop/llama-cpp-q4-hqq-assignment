@@ -1,0 +1,87 @@
+ggml_vulkan: Found 2 Vulkan devices:
+ggml_vulkan: 0 = NVIDIA GeForce RTX 3050 Ti Laptop GPU (NVIDIA) | uma: 0 | fp16: 1 | bf16: 1 | fp4: 0 | warp size: 32 | shared memory: 49152 | int dot: 1 | matrix cores: NV_coopmat2
+ggml_vulkan: 1 = Intel(R) UHD Graphics (Intel Corporation) | uma: 1 | fp16: 1 | bf16: 0 | fp4: 0 | warp size: 32 | shared memory: 32768 | int dot: 1 | matrix cores: none
+error while handling argument "-m": expected value for argument
+System.Management.Automation.RemoteException
+usage:
+-m,    --model FNAME                    model path to load
+                                        (env: LLAMA_ARG_MODEL)
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+to show complete usage, run with -h
+error while handling argument "-ngl": invalid stoi argument
+System.Management.Automation.RemoteException
+usage:
+-ngl,  --gpu-layers, --n-gpu-layers N   max. number of layers to store in VRAM, either an exact number,
+                                        'auto', or 'all' (default: auto)
+                                        (env: LLAMA_ARG_N_GPU_LAYERS)
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+to show complete usage, run with -h
+error while handling argument "-sm": invalid value
+System.Management.Automation.RemoteException
+usage:
+-sm,   --split-mode {none,layer,row,tensor}
+                                        how to split the model across multiple GPUs, one of:
+                                        - none: use one GPU only
+                                        - layer (default): split layers and KV across GPUs (pipelined)
+                                        - row: split weight across GPUs by rows (parallelized)
+                                        - tensor: split weights and KV across GPUs (parallelized,
+                                        EXPERIMENTAL)
+                                        (env: LLAMA_ARG_SPLIT_MODE)
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+to show complete usage, run with -h
+error: invalid argument: --draft
+error while handling argument "-lm": invalid value
+System.Management.Automation.RemoteException
+usage:
+-lm,   --load-mode MODE                 model loading mode (default: mmap)
+                                        - none: no special loading mode
+                                        - mmap: memory-map model (if mmap disabled, slower load but may reduce
+                                        pageouts if not using mlock)
+                                        - mlock: mmap + force system to keep model in RAM rather than swapping
+                                        or compressing
+                                        - dio: use DirectIO if available
+
+                                        (env: LLAMA_ARG_LOAD_MODE)
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+to show complete usage, run with -h
+error while handling argument "--mmproj-backend": expected value for argument
+System.Management.Automation.RemoteException
+usage:
+--mmproj-backend DEVICE                 device to use for multimodal projector (e.g. CPU)
+                                        use --list-devices to see a list of available accelerator devices
+                                        (env: LLAMA_ARG_MMPROJ_BACKEND)
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+to show complete usage, run with -h
+error while handling argument "--mmproj-backend": invalid device: invalid-mmproj-device
+System.Management.Automation.RemoteException
+usage:
+--mmproj-backend DEVICE                 device to use for multimodal projector (e.g. CPU)
+                                        use --list-devices to see a list of available accelerator devices
+                                        (env: LLAMA_ARG_MMPROJ_BACKEND)
+System.Management.Automation.RemoteException
+System.Management.Automation.RemoteException
+to show complete usage, run with -h
+test-arg-parser: make sure there is no duplicated arguments in any examples
+
+test-arg-parser: test invalid usage
+
+test-arg-parser: test valid usage
+
+test-arg-parser: skip on windows build
+test-arg-parser: test download functions
+
+test-arg-parser: test good URL
+
+test-arg-parser: test bad URL
+
+test-arg-parser: test max size error
+  expected error: error: cannot make GET request
+
+test-arg-parser: all tests OK
+
+EXIT_CODE=0
