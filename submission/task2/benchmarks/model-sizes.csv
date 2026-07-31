@@ -1,0 +1,6 @@
+﻿"Quant","Role","Bytes","MiB","Path"
+"F16","source","6433688000","6135.64","C:\Dev\Base\Presales\Tether\llama.cpp\models\llama-3.2-3b-instruct-f16.gguf"
+"Q4_0","existing","1917190592","1828.38","C:\Dev\Base\Presales\Tether\llama.cpp\models\llama-3.2-3b-instruct-q4_0.gguf"
+"Q4_HQQ","existing","2093351360","1996.38","C:\Dev\Base\Presales\Tether\llama.cpp\models\llama-3.2-3b-instruct-q4_hqq.gguf"
+"Q4_0","fresh-stage06","1917190592","1828.38","C:\Users\oadmin\Documents\tether\stage06-876f7732\stage06-temp-models\llama-3.2-3b-instruct-q4_0-stage06.gguf"
+"Q4_HQQ","fresh-stage06","2093351360","1996.38","C:\Users\oadmin\Documents\tether\stage06-876f7732\stage06-temp-models\llama-3.2-3b-instruct-q4_hqq-stage06.gguf"

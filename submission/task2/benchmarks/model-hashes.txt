@@ -1,0 +1,16 @@
+FILE: "llama-3.2-3b-instruct-q4_0.gguf"
+SHA256 hash of llama-3.2-3b-instruct-q4_0.gguf:
+cad0fc6144407850ffc131c4ccaa05c83d675735bb108090a839d145ac6aa767
+CertUtil: -hashfile command completed successfully.
+FILE: "llama-3.2-3b-instruct-q4_hqq.gguf"
+SHA256 hash of llama-3.2-3b-instruct-q4_hqq.gguf:
+a05262e0ccebb8990e91d8b0302806934050b8623a92065649217dd4b222e468
+CertUtil: -hashfile command completed successfully.
+FILE: "llama-3.2-3b-instruct-q4_0-stage06.gguf"
+SHA256 hash of llama-3.2-3b-instruct-q4_0-stage06.gguf:
+cad0fc6144407850ffc131c4ccaa05c83d675735bb108090a839d145ac6aa767
+CertUtil: -hashfile command completed successfully.
+FILE: "llama-3.2-3b-instruct-q4_hqq-stage06.gguf"
+SHA256 hash of llama-3.2-3b-instruct-q4_hqq-stage06.gguf:
+a05262e0ccebb8990e91d8b0302806934050b8623a92065649217dd4b222e468
+CertUtil: -hashfile command completed successfully.

@@ -1,9 +1,9 @@
 # QVAC Foundation Engineer Assignment
 
-**Candidate:** Vladislav Savinov  
-**Repository base:** `555881ebc8b0fc0402b30e09258a32a7bfd13c52`  
-**Working branch:** `task2-q4-hqq`  
-**Primary platform:** Windows 11, x86-64  
+**Candidate:** Vladislav Savinov
+**Repository base:** `555881ebc8b0fc0402b30e09258a32a7bfd13c52`
+**Working branch:** `task2-q4-hqq`
+**Primary platform:** Windows 11, x86-64
 **Additional validation:** Ubuntu WSL2 and macOS on Apple M1
 
 ---

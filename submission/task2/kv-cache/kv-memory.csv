@@ -1,0 +1,7 @@
+CacheType,Run,ExitCode,TimedOut,Context,Threads,Seed,PeakWorkingSetMiB,PeakPrivateMemoryMiB,ElapsedSeconds
+f16,1,0,False,32768,10,42,5663.88,3812.88,13.76
+f16,2,0,False,32768,10,42,5662.69,3812.64,13.15
+f16,3,0,False,32768,10,42,5662.26,3811.64,12.99
+q4_hqq,1,0,False,32768,10,42,3198.7,1337.21,10.21
+q4_hqq,2,0,False,32768,10,42,3198.95,1338.83,11.01
+q4_hqq,3,0,False,32768,10,42,3199.14,1337.93,11.43

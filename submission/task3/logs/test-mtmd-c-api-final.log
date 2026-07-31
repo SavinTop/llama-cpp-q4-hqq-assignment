@@ -1,0 +1,23 @@
+
+
+Testing libmtmd C API...
+--------
+
+Default image marker: (null)
+Total tokens in chunks: 261
+Number of chunks: 2
+Chunk 0 type: 0
+    Text chunk with 5 tokens
+    > Token 0: 1
+    > Token 1: 2
+    > Token 2: 3
+    > Token 3: 4
+    > Token 4: 5
+Chunk 1 type: 1
+    Image chunk with 256 tokens
+    Image size: 256 x 256
+    Image ID: image_1
+
+
+DONE: test libmtmd C API...
+EXIT_CODE=0

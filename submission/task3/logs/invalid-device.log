@@ -1,0 +1,12 @@
+=== STDERR ===
+error while handling argument "--mmproj-backend": invalid device: invalid-mmproj-device
+
+usage:
+--mmproj-backend DEVICE                 device to use for multimodal projector (e.g. CPU)
+                                        use --list-devices to see a list of available accelerator devices
+                                        (env: LLAMA_ARG_MMPROJ_BACKEND)
+
+
+to show complete usage, run with -h
+=== STDOUT ===
+EXIT_CODE=1
